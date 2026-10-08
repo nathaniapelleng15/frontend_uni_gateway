@@ -36,6 +36,25 @@ test('frame tetap diperkecil agar unggahan ringan', () => {
   assert.match(source, /1400 \/ longSide/, 'sisi terpanjang dibatasi ~1400 px');
 });
 
+test('flash putih saat jepret benar-benar penuh dan tidak teredupkan transisi lambat', () => {
+  assert.match(source, /setTimeout\(\(\) => setFlash\(false\), 350\)/);
+  assert.match(source, /bg-white z-\[100\][^`]*duration-0/);
+  assert.match(source, /\$\{flash \? 'opacity-100' : 'opacity-0'\}/);
+});
+
+test('hasil jepretan disimpan tanpa mirror dan memakai seluruh frame kamera', () => {
+  assert.match(source, /photoCanvas\.getContext\('2d'\)/);
+  assert.match(source, /photoCtx\.translate\(photoCanvas\.width, 0\)/);
+  assert.match(source, /photoCtx\.scale\(-1, 1\)/);
+  assert.match(source, /photoCtx\.drawImage\(canvas, 0, 0\)/);
+  assert.ok(source.includes("photoCanvas.toDataURL('image/jpeg', 0.95)"));
+});
+
+test('preview pemotretan tidak memotong area kamera dengan object-cover', () => {
+  assert.match(source, /id="camera-preview"[^>]*object-contain/);
+  assert.doesNotMatch(source, /id="camera-preview"[^>]*object-cover/);
+});
+
 test('bingkai panduan di layar tetap ada sebagai petunjuk visual', () => {
   assert.match(source, /guideFrameStyle\(\)/, 'bingkai harus memakai SCAN_GUIDE');
   assert.match(source, /Posisikan bukti bayar di area ini/);

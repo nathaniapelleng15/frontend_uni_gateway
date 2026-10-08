@@ -73,6 +73,14 @@ export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
   data?: T;
+  package_visibility?: {
+    show_digital_package?: boolean;
+    show_print_package?: boolean;
+  };
+  control_visibility?: {
+    show_cursor_lock_icon?: boolean;
+    show_calibration_icon?: boolean;
+  };
   session_code?: string;
   amount?: number;
   price?: number;
@@ -96,7 +104,13 @@ export interface SessionData {
    * sehingga layar bayar dilewati. Sesi tetap ditandai 'verified' di database.
    */
   payment_required?: boolean;
-  payment_method?: 'qris_visual_proof' | 'gopay_merchant_polling' | string;
+  qris_image_url?: string | null;
+  payment_url?: string | null;
+  payment_expires_at?: string | null;
+  payment_environment?: string;
+  merchant_order_id?: string;
+  package_type?: 'digital' | 'digital_print';
+  payment_method?: 'duitku_qris' | 'qris_visual_proof' | 'gopay_merchant_polling' | string;
 }
 
 export interface SessionPaymentStatus {
@@ -256,7 +270,8 @@ export const checkBackendHealth = async (url: string, currentApiKey: string): Pr
  */
 export const startSession = async (
   kioskId: string,
-  frameTemplateId: number
+  frameTemplateId: number,
+  packageType: 'digital' | 'digital_print' = 'digital_print'
 ): Promise<SessionData> => {
   if (!Number.isInteger(frameTemplateId) || frameTemplateId <= 0) {
     throw new KioskApiError('Template frame tidak memiliki ID backend yang valid.');
@@ -265,7 +280,7 @@ export const startSession = async (
   const response = await request<ApiResponse>({
     method: 'POST',
     url: '/sessions/start',
-    data: { frame_template_id: Number(frameTemplateId) }
+    data: { frame_template_id: Number(frameTemplateId), package_type: packageType }
   });
   const data = response.data;
   const sessionCode = data.session_code || (data.data as any)?.session_code;
@@ -284,6 +299,12 @@ export const startSession = async (
     status: 'active',
     challenge_id: challengeId,
     unique_code: Number.isInteger(uniqueCode) && uniqueCode > 0 ? uniqueCode : null,
+    qris_image_url: (data.data as any)?.qris_image_url || null,
+    payment_url: (data.data as any)?.payment_url || null,
+    payment_expires_at: (data.data as any)?.payment_expires_at || null,
+    payment_environment: (data.data as any)?.payment_environment,
+    merchant_order_id: (data.data as any)?.merchant_order_id,
+    package_type: (data.data as any)?.package_type,
     payment_method: (data.data as any)?.payment_method || 'qris_visual_proof',
     // false = server sedang mematikan pembayaran (payment_profiles.payment_required
     // = false) untuk keperluan uji; layar bayar dilewati.
@@ -556,6 +577,54 @@ export const fetchTemplates = async (): Promise<any[]> => {
     throw new KioskApiError(response.data.message || 'Template backend kosong atau tidak dapat dibaca.', response.status);
   }
   return templates;
+};
+
+export interface PhotoboothControlVisibility {
+  show_cursor_lock_icon: boolean;
+  show_calibration_icon: boolean;
+}
+
+/** Ambil setelan visibilitas ikon operator dari profil kiosk yang disimpan Admin. */
+export const fetchPhotoboothControlVisibility = async (): Promise<PhotoboothControlVisibility> => {
+  const response = await request<ApiResponse<any>>({
+    method: 'GET',
+    url: '/payments',
+    headers: { 'Cache-Control': 'no-store, no-cache' },
+    params: { _t: Date.now() },
+  });
+  if (!response.data.success) {
+    throw new KioskApiError(response.data.message || 'Pengaturan ikon photobooth tidak tersedia.', response.status);
+  }
+  const visibility = response.data.control_visibility;
+  return {
+    show_cursor_lock_icon: visibility?.show_cursor_lock_icon !== false,
+    show_calibration_icon: visibility?.show_calibration_icon !== false,
+  };
+};
+
+export interface PackageVisibility {
+  show_digital_package: boolean;
+  show_print_package: boolean;
+}
+
+/** Ambil kebijakan paket dari profil kiosk yang sama dengan pengaturan Admin. */
+export const fetchPackageVisibility = async (): Promise<PackageVisibility> => {
+  const response = await request<ApiResponse<any>>({
+    method: 'GET',
+    url: '/payments',
+    headers: { 'Cache-Control': 'no-store, no-cache' },
+    params: { _t: Date.now() },
+  });
+  if (!response.data.success) {
+    throw new KioskApiError(response.data.message || 'Pengaturan paket tidak tersedia.', response.status);
+  }
+  const visibility = response.data.package_visibility;
+  return {
+    // Kompatibilitas profil/backend lama: selama server belum pernah menyimpan
+    // saklar ini, perilaku lama (kedua paket tampil) tetap dipertahankan.
+    show_digital_package: visibility?.show_digital_package !== false,
+    show_print_package: visibility?.show_print_package !== false,
+  };
 };
 
 export const fetchPaymentProfile = async (): Promise<string | null> => {

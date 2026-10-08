@@ -24,7 +24,8 @@ import {
   verifyPayment, fetchTemplates, queuePrintJob, getPrintJobStatus, KioskApiError,
   getApiConfig, isAutoPrintEnabled, isManualPrintFallbackEnabled,
   submitPaymentEvidence, getPaymentVerificationStatus, fetchPrintingConfig,
-  getSessionPaymentStatus, simpanKonfigurasiServer, sumberKonfigurasi
+  getSessionPaymentStatus, simpanKonfigurasiServer, sumberKonfigurasi, fetchPackageVisibility,
+  fetchPhotoboothControlVisibility
 } from '../services/apiService';
 
 // Global Scale (Now 1.0 since we removed transform scale from index.html)
@@ -483,6 +484,7 @@ interface BoothWrapperProps {
   onAdminClick?: () => void;
   hideAdmin?: boolean;
   isLocked?: boolean;
+  showLockButton?: boolean;
   onToggleLock?: () => void;
   uiMode: 'normal' | 'air-touch';
   hideHeader?: boolean;
@@ -492,7 +494,7 @@ interface BoothWrapperProps {
   isVertical?: boolean;
 }
 
-const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical }) => (
+const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, showLockButton = true, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical }) => (
   <div className={`h-full w-full ${customBg || 'bg-[#0c1633]'} text-white flex flex-col overflow-hidden select-none relative`}>
       {/* Logos at Bottom Center for all wrapper screens */}
       {!hideLogos && (
@@ -533,7 +535,7 @@ const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, 
 
             {/* Absolute positioned right actions */}
             <div className={`absolute right-4 top-1/2 -translate-y-1/2 flex z-20 ${uiMode === 'air-touch' ? 'gap-6' : 'gap-3'}`}>
-                {onToggleLock && (
+                {onToggleLock && showLockButton && (
                 <button id="btn-toggle-cursor-lock" onClick={onToggleLock} className={`rounded-full transition-colors active:scale-95 border-2 ${uiMode === 'air-touch' ? 'p-6' : 'p-4'} ${isLocked ? 'bg-red-500/80 border-red-400' : 'bg-green-500/20 border-green-400/50 hover:bg-green-500/40'}`} style={{ display: uiMode === 'air-touch' ? 'block' : 'none' }}>
                     {isLocked ? <Lock size={uiMode === 'air-touch' ? 40 : 32} /> : <Unlock size={uiMode === 'air-touch' ? 40 : 32} />}
                 </button>
@@ -842,6 +844,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   // State
   const [selectedPackage, setSelectedPackage] = useState<'print' | 'digital' | null>(null);
+  const [packageVisibility, setPackageVisibility] = useState({ digital: true, print: true });
+  const [packageVisibilityStatus, setPackageVisibilityStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [packageVisibilityRetry, setPackageVisibilityRetry] = useState(0);
   const [selectedLayoutId, setSelectedLayoutId] = useState<GridLayoutId | null>(null);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilter | null>(null);
@@ -1266,6 +1271,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const handsRef = useRef<any>(null);
   const [gestureEnabled, setGestureEnabled] = useState(false);
   const [isCursorLocked, setIsCursorLocked] = useState(false);
+  const [showCursorLockIcon, setShowCursorLockIcon] = useState(true);
+  const [showCalibrationIcon, setShowCalibrationIcon] = useState(true);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibrationBox, setCalibrationBox] = useState({ minX: 0.3, maxX: 0.7, minY: 0.25, maxY: 0.75 });
   // This ref is updated EVERY render so the MediaPipe callback always has fresh closures
@@ -1352,6 +1359,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [sessionCode, setSessionCode] = useState<string>('');
   const [qrisUrl, setQrisUrl] = useState<string | null>(null);
   const [qrisLoading, setQrisLoading] = useState(false);
+  const [paymentExpiresAt, setPaymentExpiresAt] = useState<string | null>(null);
+  const [paymentEnvironment, setPaymentEnvironment] = useState<string>('');
+  const [merchantOrderId, setMerchantOrderId] = useState<string>('');
+  const [sandboxCopyMessage, setSandboxCopyMessage] = useState<string>('');
+  const sandboxOrderInputRef = useRef<HTMLInputElement>(null);
   const [finalUploadedUrl, setFinalUploadedUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1515,6 +1527,54 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     }
     return false;
   }, []);
+
+  useEffect(() => {
+    let current = true;
+    const loadControlVisibility = async () => {
+      try {
+        const visibility = await fetchPhotoboothControlVisibility();
+        if (!current) return;
+        setShowCursorLockIcon(visibility.show_cursor_lock_icon);
+        setShowCalibrationIcon(visibility.show_calibration_icon);
+      } catch (error) {
+        // Gagal koneksi tidak mengubah pilihan terakhir; nilai bawaan tetap
+        // menampilkan ikon seperti perilaku photobooth sebelum saklar Admin.
+        console.warn('[PhotoBooth] Pengaturan ikon gagal dimuat:', error);
+      }
+    };
+
+    void loadControlVisibility();
+    const interval = window.setInterval(() => { void loadControlVisibility(); }, 30_000);
+    return () => { current = false; window.clearInterval(interval); };
+  }, []);
+
+  useEffect(() => {
+    if (!showCursorLockIcon) setIsCursorLocked(false);
+    if (!showCalibrationIcon) setIsCalibrating(false);
+  }, [showCursorLockIcon, showCalibrationIcon]);
+
+  useEffect(() => {
+    if (step !== 'PACKAGE') return;
+
+    let current = true;
+    setPackageVisibilityStatus('loading');
+    fetchPackageVisibility()
+      .then(visibility => {
+        if (!current) return;
+        setPackageVisibility({
+          digital: visibility.show_digital_package,
+          print: visibility.show_print_package,
+        });
+        setPackageVisibilityStatus('ready');
+      })
+      .catch(error => {
+        if (!current) return;
+        console.warn('[PhotoBooth] Pengaturan paket gagal dimuat:', error);
+        setPackageVisibilityStatus('error');
+      });
+
+    return () => { current = false; };
+  }, [step, packageVisibilityRetry]);
 
   useEffect(() => {
     void refreshFrames();
@@ -2072,6 +2132,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setSessionAmount(null);
       setUniqueCode(null);
       setPaymentMethod('qris_visual_proof');
+      setQrisUrl(null);
+      setPaymentExpiresAt(null);
+      setPaymentEnvironment('');
+      setMerchantOrderId('');
+      setSandboxCopyMessage('');
       setPaymentPollingState('idle');
       setVerificationStatus('');
       setVerificationReasonCodes([]);
@@ -2084,9 +2149,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       clearPersistedPrintJob();
       finalPhotoUploadPromiseRef.current = null;
       sessionCompletedRef.current = false;
+      setPackageVisibilityStatus('loading');
       setStep('PACKAGE');
   };
   const handlePackageSelect = (pkg: 'print' | 'digital') => {
+      if (packageVisibilityStatus !== 'ready' || !packageVisibility[pkg]) return;
       setSelectedPackage(pkg);
       setStep('LAYOUT');
   };
@@ -2117,12 +2184,19 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     );
 
     try {
-      const sessionData = await startSession(kioskId, templateId);
+      if (!selectedPackage) throw new KioskApiError('Pilih paket terlebih dahulu.');
+      const sessionData = await startSession(kioskId, templateId, selectedPackage === 'digital' ? 'digital' : 'digital_print');
+      setSelectedPackage(sessionData.package_type === 'digital' ? 'digital' : 'print');
       setSessionCode(sessionData.id);
       setSessionAmount(sessionData.amount ?? null);
       setUniqueCode(sessionData.unique_code ?? null);
       setPaymentMethod(sessionData.payment_method || 'qris_visual_proof');
-      setPaymentPollingState(sessionData.payment_method === 'gopay_merchant_polling' ? 'checking' : 'idle');
+      setQrisUrl(sessionData.qris_image_url || null);
+      setPaymentExpiresAt(sessionData.payment_expires_at || null);
+      setPaymentEnvironment(sessionData.payment_environment || '');
+      setMerchantOrderId(sessionData.merchant_order_id || '');
+      setSandboxCopyMessage('');
+      setPaymentPollingState(['gopay_merchant_polling', 'duitku_qris'].includes(sessionData.payment_method || '') ? 'checking' : 'idle');
       setChallengeId(sessionData.challenge_id || '');
       // Pembayaran bisa dimatikan dari sisi server (payment_profiles.payment_required
       // = false) untuk keperluan uji. Sesi sudah ditandai 'verified' di database,
@@ -2140,7 +2214,31 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setFlowError(message);
     }
   };
+  const handleSandboxPaymentTest = async () => {
+    if (paymentMethod !== 'duitku_qris' || paymentEnvironment !== 'sandbox' || !merchantOrderId
+      || paymentPollingState === 'expired') return;
+    // Open during the click so clipboard permission does not trigger popup blocking.
+    window.open('https://sandbox.duitku.com/payment/demo/demosuccesstransaction.aspx', '_blank', 'noopener,noreferrer');
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(merchantOrderId);
+      } else {
+        const input = sandboxOrderInputRef.current;
+        if (!input) throw new Error('Order ID input unavailable');
+        input.focus();
+        input.select();
+        if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+      }
+      setSandboxCopyMessage('Order ID disalin. Paste di simulator, lalu klik Check.');
+    } catch (_) {
+      sandboxOrderInputRef.current?.focus();
+      sandboxOrderInputRef.current?.select();
+      setSandboxCopyMessage('Salin Order ID dari kolom di atas, lalu paste di simulator.');
+    }
+  };
+
   const handlePaymentConfirm = () => {
+    if (paymentMethod === 'duitku_qris') return;
     setFlowError(null);
     setVerificationStatus('');
     setVerificationReasonCodes([]);
@@ -2591,7 +2689,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   // Dev testing shortcut: Only active during local dev, disabled in production
   useEffect(() => {
-    if (!import.meta.env.DEV) return;
+    if (!import.meta.env.DEV || paymentMethod === 'duitku_qris') return;
 
     const handleDevKey = (e: KeyboardEvent) => {
       if ((e.key === 'p' || e.key === 'P') && ['PAYMENT', 'PAYMENT_SCAN', 'PAYMENT_CHECKING'].includes(step)) {
@@ -2605,7 +2703,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     };
     window.addEventListener('keydown', handleDevKey);
     return () => window.removeEventListener('keydown', handleDevKey);
-  }, [step]);
+  }, [step, paymentMethod]);
 
   const handleFinish = () => { 
     setStep('RESULT'); 
@@ -2633,9 +2731,20 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     }
     setFlash(true);
     if (shutterAudioRef.current) { shutterAudioRef.current.currentTime = 0; shutterAudioRef.current.play().catch(e=>{}); }
-    setTimeout(() => setFlash(false), 150); 
+    setTimeout(() => setFlash(false), 350);
     const canvas = processingCanvasRef.current;
-    const photo = canvas.toDataURL('image/jpeg', 0.95);
+    // Canvas preview disimpan dalam orientasi mirror untuk selfie preview.
+    // Balik sekali lagi ke canvas baru saat menyimpan foto agar file hasilnya
+    // natural (tidak mirror), tanpa mengubah tampilan live.
+    const photoCanvas = document.createElement('canvas');
+    photoCanvas.width = canvas.width;
+    photoCanvas.height = canvas.height;
+    const photoCtx = photoCanvas.getContext('2d');
+    if (!photoCtx) return;
+    photoCtx.translate(photoCanvas.width, 0);
+    photoCtx.scale(-1, 1);
+    photoCtx.drawImage(canvas, 0, 0);
+    const photo = photoCanvas.toDataURL('image/jpeg', 0.95);
     const photoIndex = retakeIndex === null ? capturedPhotos.length : retakeIndex;
     setCapturedPhotos(prev => retakeIndex === null
       ? [...prev, photo]
@@ -3009,7 +3118,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   // Re-fetch QRIS image every time user enters PAYMENT step
   useEffect(() => {
-    if (step === 'PAYMENT') {
+    if (step === 'PAYMENT' && paymentMethod !== 'duitku_qris') {
       setQrisUrl(null);
       setQrisLoading(true);
       fetchPaymentProfile()
@@ -3019,10 +3128,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         })
         .finally(() => setQrisLoading(false));
     }
-  }, [step]);
+  }, [step, paymentMethod]);
 
   useEffect(() => {
-    if (step !== 'PAYMENT' || paymentMethod !== 'gopay_merchant_polling' || !sessionCode) return;
+    if (step !== 'PAYMENT' || !['gopay_merchant_polling', 'duitku_qris'].includes(paymentMethod) || !sessionCode) return;
 
     let cancelled = false;
     let timer: number | null = null;
@@ -3067,7 +3176,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     (selectedFrame as any)?._layoutConfig?.layout_price
   );
   const selectedLayoutPrice = positiveNumber(selectedLayout?.price);
-  const payableAmount = sessionAmount ?? selectedFramePrice ?? selectedLayoutPrice;
+  const selectedPackagePrice = positiveNumber((selectedFrame as any)?.[selectedPackage === 'digital' ? 'digital_price' : 'digital_print_price']);
+  const payableAmount = sessionAmount ?? selectedPackagePrice ?? selectedFramePrice ?? selectedLayoutPrice;
 
   // Tombol Download dihapus (2026-09-30): pengunjung mengambil foto lewat QR;
   // tombol unduh lokal malah menambah langkah dan rawan salah tap di kiosk.
@@ -3124,6 +3234,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, []);
 
   const handleManualPrint = async () => {
+      if (selectedPackage !== 'print') return;
       if (!areAssetsReady) {
           alert('Tunggu sampai hasil foto selesai diproses.');
           return;
@@ -3155,6 +3266,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   };
 
   const handleAutoPrint = async () => {
+      if (selectedPackage !== 'print') return;
       if (printActionInFlightRef.current || isPrintActive || printState === 'success') return;
       if (!areAssetsReady || !sessionCode) {
           setPrintError(!sessionCode ? 'Sesi foto belum tersedia.' : 'Tunggu sampai hasil foto selesai diproses.');
@@ -3323,6 +3435,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   };
 
   const handlePrint = () => {
+      if (selectedPackage !== 'print') return;
       if (isAutoPrintEnabled()) {
           void handleAutoPrint();
       } else {
@@ -3612,8 +3725,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                </button>
             </div>
             <div className="absolute top-8 right-8 flex gap-4 z-50">
-               <button id="btn-toggle-cursor-lock-landing" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`rounded-full backdrop-blur-sm transition-colors border-2 ${isAirTouch ? 'p-6' : 'p-4'} ${isCursorLocked ? 'bg-red-500/20 border-red-400 text-white' : 'bg-white/10 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>
-               <button id="btn-calibrate-landing" onClick={() => setIsCalibrating(true)} className={`${isAirTouch ? 'p-6' : 'p-4'} rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20`} style={{ display: isAirTouch ? 'block' : 'none' }}><Scan size={isAirTouch?40:40} /></button>
+               {showCursorLockIcon && <button id="btn-toggle-cursor-lock-landing" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`rounded-full backdrop-blur-sm transition-colors border-2 ${isAirTouch ? 'p-6' : 'p-4'} ${isCursorLocked ? 'bg-red-500/20 border-red-400 text-white' : 'bg-white/10 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>}
+               {showCalibrationIcon && <button id="btn-calibrate-landing" onClick={() => setIsCalibrating(true)} className={`${isAirTouch ? 'p-6' : 'p-4'} rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20`} style={{ display: isAirTouch ? 'block' : 'none' }}><Scan size={isAirTouch?40:40} /></button>}
                <button id="btn-admin-settings-landing" onClick={onAdminClick} className={`text-white/70 hover:text-white transition-colors bg-white/10 ${isAirTouch ? 'p-6' : 'p-4'} rounded-full hover:bg-white/20 backdrop-blur-sm border-2 border-white/20`}><Settings size={isAirTouch?40:40} /></button>
             </div>
             <div id="gesture-status-banner" className="absolute top-8 left-1/2 -translate-x-1/2 text-white/80 bg-black/30 px-6 py-2 rounded-full backdrop-blur text-lg pointer-events-none text-center whitespace-nowrap" style={{ display: gestureEnabled ? 'block' : 'none' }}>
@@ -3626,30 +3739,54 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PACKAGE' && (
-        <BoothWrapper title="Choose Package" subtitle="Select your preferred output" onAdminClick={onAdminClick} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => setStep('LANDING')} isVertical={isVertical}>
-            <div className={`h-full flex flex-col items-center justify-center ${isVertical ? 'p-4 gap-6' : 'p-10 gap-10'}`}>
-                <button 
+        <BoothWrapper title="Choose Package" subtitle="Select your preferred output" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => setStep('LANDING')} isVertical={isVertical}>
+            {packageVisibilityStatus === 'loading' ? (
+              <div className="h-full flex flex-col items-center justify-center gap-4 text-white">
+                <Loader2 className="animate-spin" size={44} />
+                <p className="font-bold">Memuat pilihan paket...</p>
+              </div>
+            ) : packageVisibilityStatus === 'error' ? (
+              <div className="h-full flex flex-col items-center justify-center gap-5 p-8 text-center text-white">
+                <AlertTriangle size={48} className="text-amber-300" />
+                <p className="text-xl font-bold">Pilihan paket belum dapat dimuat.</p>
+                <p className="text-white/70">Periksa koneksi kiosk, lalu coba lagi.</p>
+                <button onClick={() => setPackageVisibilityRetry(value => value + 1)} className="rounded-xl bg-[#f6cd46] px-6 py-3 font-black text-black">Coba Lagi</button>
+              </div>
+            ) : !packageVisibility.digital && !packageVisibility.print ? (
+              <div className="h-full flex flex-col items-center justify-center gap-4 p-8 text-center text-white">
+                <AlertTriangle size={48} className="text-amber-300" />
+                <p className="text-xl font-bold">Paket belum tersedia.</p>
+                <p className="text-white/70">Silakan minta operator mengaktifkan paket di Admin.</p>
+              </div>
+            ) : (
+              <div className={`h-full flex flex-col items-center justify-center ${isVertical ? 'p-4 gap-6' : 'p-10 gap-10'}`}>
+                {packageVisibility.print && (
+                  <button
                     onClick={() => handlePackageSelect('print')}
                     className="w-full max-w-md bg-[#f6cd46] hover:bg-[#e5bc35] text-black rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all active:scale-95 shadow-xl hover:shadow-2xl border-4 border-transparent hover:border-white/50"
-                >
+                  >
                     <Printer size={64} />
                     <h3 className="text-3xl font-black">Print + Digital</h3>
                     <p className="text-center font-medium opacity-80">Get a physical copy and digital download</p>
-                </button>
-                <button 
+                  </button>
+                )}
+                {packageVisibility.digital && (
+                  <button
                     onClick={() => handlePackageSelect('digital')}
                     className="w-full max-w-md bg-white/10 hover:bg-white/20 text-white rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all active:scale-95 shadow-xl hover:shadow-2xl border border-white/20"
-                >
+                  >
                     <Download size={64} />
                     <h3 className="text-3xl font-black">Digital Only</h3>
                     <p className="text-center text-white/70">Softcopy only, sent to your email or phone</p>
-                </button>
-            </div>
+                  </button>
+                )}
+              </div>
+            )}
         </BoothWrapper>
       )}
 
       {step === 'LAYOUT' && (
-        <BoothWrapper title="Choose Layout" subtitle="Tap to select your format" onAdminClick={onAdminClick} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => setStep('PACKAGE')} isVertical={isVertical}>
+        <BoothWrapper title="Choose Layout" subtitle="Tap to select your format" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => { setPackageVisibilityStatus('loading'); setStep('PACKAGE'); }} isVertical={isVertical}>
             <div className={`h-full flex flex-col ${isVertical ? 'p-4' : isAirTouch ? 'p-10' : 'p-6 md:p-10'}`}>
                 <div className={`flex-1 overflow-y-auto flex items-center justify-center`}>{/* Kontainer diperlebar (2026-09-30): kartu layout tadinya kecil — max-w-xs di vertikal hanya ~320px (kartu ~154px), max-w-4xl di horizontal. Semua mode naik satu-dua tingkat supaya pratinjau layout terbaca jelas dari jarak pengunjung. */}
                     <div className={`flex flex-wrap justify-center items-center w-full mx-auto ${isVertical ? 'gap-3 max-w-md pt-2 pb-4' : isAirTouch ? 'gap-10 md:gap-14 max-w-6xl' : 'gap-5 md:gap-8 max-w-5xl lg:max-w-6xl pb-6'}`}>
@@ -3669,6 +3806,13 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                             >
                                  <div className={`grid gap-1 w-full h-full rounded-xl ${isVertical ? 'p-2' : 'p-3 gap-2'} ${layout.id === '1x1' ? 'grid-cols-1 grid-rows-1' : layout.id === '2x1' ? 'grid-cols-1 grid-rows-2' : layout.id === '3x1' ? 'grid-cols-1 grid-rows-3' : layout.id === '4x1' ? 'grid-cols-1 grid-rows-4' : layout.id === '2x2' ? 'grid-cols-2 grid-rows-2' : layout.id === '2x3' ? 'grid-cols-2 grid-rows-3' : 'grid-cols-3 grid-rows-3'}`}>{Array.from({length: layout.count}).map((_, i) => (<div key={i} className="bg-white/40 rounded-sm group-hover:bg-pink-300/60 transition-colors"></div>))}</div>
                                 <span className={`font-bold tracking-wide ${isVertical ? 'text-sm' : isAirTouch ? 'text-2xl md:text-3xl' : 'text-base md:text-xl'}`}>{layout.label}</span>
+                                <span className="text-sm font-bold text-[#f6cd46]">
+                                  {(() => {
+                                    const style = (frames.find(frame => frame.id === layout.id) as any)?.styles?.[0];
+                                    const value = positiveNumber(style?.[selectedPackage === 'digital' ? 'digital_price' : 'digital_print_price'], style?.price);
+                                    return value === null ? 'Harga belum tersedia' : `Rp ${value.toLocaleString('id-ID')}`;
+                                  })()}
+                                </span>
                             </button>
                         ))}
                     </div>
@@ -3678,7 +3822,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PAYMENT' && (
-        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader customBg="bg-[#0c1633]" isVertical={isVertical}>
+        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader customBg="bg-[#0c1633]" isVertical={isVertical}>
              <div className="h-full w-full bg-[#0c1633] flex flex-col items-center justify-center relative overflow-hidden p-6">
                 
                 <div className="z-10 w-full max-w-7xl flex flex-col items-center">
@@ -3700,23 +3844,26 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                             <div className="flex flex-col items-center w-full max-w-[260px] md:max-w-[320px]">
                                 <div className="w-full bg-white flex flex-col items-center justify-center p-4 md:p-5 shadow-2xl rounded-2xl animate-scale-in relative">
                                     <div className="flex justify-between items-center w-full mb-3 px-2">
-                                        <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">QRIS</span>
+                                        <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">{paymentMethod === 'duitku_qris' ? 'QRIS Dinamis' : 'QRIS'}</span>
                                         <span className="text-[#00aead] font-black text-lg md:text-xl">
                                             {payableAmount === null
                                               ? 'Harga belum tersedia'
                                               : new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(payableAmount)}
                                         </span>
                                     </div>
+                                    <p className="mb-2 text-xs font-bold text-gray-500">{selectedPackage === 'digital' ? 'Paket Digital' : 'Paket Digital & Print'}</p>
                                     {uniqueCode !== null && (
                                       <div className="w-full mb-2 px-2 text-[11px] md:text-xs font-bold text-gray-500 text-center uppercase tracking-wider">
                                         Kode unik transaksi: <span className="text-[#00aead] font-black">+{uniqueCode}</span>
                                       </div>
                                     )}
                                     <div className="flex-1 flex items-center justify-center w-full">
-                                        {qrisUrl ? (
+                                        {paymentMethod === 'duitku_qris' && paymentPollingState === 'expired' ? (
+                                            <div className="w-full h-[40vh] flex items-center justify-center text-center text-gray-500 p-4">QRIS kedaluwarsa. Kembali untuk membuat transaksi baru.</div>
+                                        ) : qrisUrl ? (
                                             <img
                                               key={qrisUrl}
-                                              src={`${qrisUrl}?t=${Date.now()}`}
+                                              src={qrisUrl}
                                               alt="QRIS Uni"
                                               className="w-full h-auto max-h-[45vh] lg:max-h-[50vh] object-contain rounded-xl"
                                             />
@@ -3729,7 +3876,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                     </div>
                                 </div>
                                 
-                                {paymentMethod === 'gopay_merchant_polling' ? (
+                                {['gopay_merchant_polling', 'duitku_qris'].includes(paymentMethod) ? (
                                   <div className="mt-4 md:mt-6 w-full rounded-xl border border-white/20 bg-white/10 p-4 text-center text-white">
                                     <div className="flex items-center justify-center gap-2 font-bold">
                                       {paymentPollingState === 'expired' ? (
@@ -3752,10 +3899,42 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                           ? 'Silakan kembali dan mulai sesi baru.'
                                           : paymentPollingState === 'retrying'
                                             ? 'Koneksi ke server terputus sementara. Pemeriksaan akan dicoba lagi otomatis.'
-                                          : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
+                                          : paymentMethod === 'duitku_qris'
+                                            ? 'Scan QRIS untuk transaksi ini. Sesi lanjut otomatis setelah pembayaran dikonfirmasi Duitku.'
+                                            : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
                                     </p>
                                     {flowError && <p className="mt-2 text-sm font-semibold text-amber-300">{flowError}</p>}
-                                    {paymentPollingState !== 'expired' && (
+                                    {paymentMethod === 'duitku_qris' && (
+                                      <p className="mt-2 text-xs text-white/75">
+                                        {paymentEnvironment === 'sandbox' && <strong className="block text-amber-300">Duitku Sandbox — pengujian</strong>}
+                                        {paymentExpiresAt && <>Berlaku sampai {new Date(paymentExpiresAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
+                                      </p>
+                                    )}
+                                    {paymentMethod === 'duitku_qris' && paymentEnvironment === 'sandbox' && merchantOrderId && (
+                                      <div className="mt-3 border-t border-white/15 pt-3 text-left">
+                                        <label htmlFor="sandbox-merchant-order-id" className="block text-xs font-bold text-white/75">Merchant Order ID</label>
+                                        <input
+                                          ref={sandboxOrderInputRef}
+                                          id="sandbox-merchant-order-id"
+                                          readOnly
+                                          value={merchantOrderId}
+                                          onFocus={event => event.currentTarget.select()}
+                                          className="mt-1 w-full rounded-lg border border-white/20 bg-white/10 px-2 py-2 font-mono text-xs text-white"
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={handleSandboxPaymentTest}
+                                          disabled={paymentPollingState === 'expired'}
+                                          className="mt-2 w-full rounded-lg bg-[#f6cd46] px-3 py-2 text-sm font-bold text-black hover:bg-[#e5bc35] disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          Salin Order ID &amp; Buka Simulator
+                                        </button>
+                                        <p aria-live="polite" className="mt-2 text-xs text-white/75">
+                                          {sandboxCopyMessage || 'Pilih metode QRIS yang sesuai di simulator, lalu paste Order ID.'}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {paymentMethod !== 'duitku_qris' && paymentPollingState !== 'expired' && (
                                       <button onClick={handlePaymentConfirm} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-white/80 underline underline-offset-2 hover:text-white">
                                         Periksa lewat kamera
                                       </button>
@@ -3789,7 +3968,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PAYMENT_SCAN' && (
-        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader hideLogos customBg="bg-[#0c1633]" isVertical={isVertical}>
+        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader hideLogos customBg="bg-[#0c1633]" isVertical={isVertical}>
           <div className="h-full w-full bg-[#0c1633] flex flex-col items-center justify-center relative p-3 sm:p-5 select-none overflow-y-auto">
             <div className="z-10 w-full max-w-md flex flex-col items-center gap-3 sm:gap-4 my-auto">
               
@@ -3977,7 +4156,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PAYMENT_CHECKING' && (
-        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader customBg="bg-[#0c1633]" isVertical={isVertical}>
+        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader customBg="bg-[#0c1633]" isVertical={isVertical}>
           <div className="h-full w-full bg-[#0c1633] flex flex-col items-center justify-center p-6">
             <div className="flex flex-col items-center gap-6 max-w-sm text-center">
               <div className="relative w-20 h-20">
@@ -3995,9 +4174,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
       {step === 'CAPTURE' && (
         <div className="h-full w-full bg-black relative overflow-hidden flex flex-col">
-            <div className={`fixed inset-0 bg-white z-[100] pointer-events-none transition-opacity duration-[150ms] ${flash ? 'opacity-100' : 'opacity-0'}`} />
+            <div className={`fixed inset-0 bg-white z-[100] pointer-events-none duration-0 ${flash ? 'opacity-100' : 'opacity-0'}`} />
                 <div className="relative flex-1 w-full bg-black overflow-hidden">
-                    <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-cover transform scale-x-[-1]" />
+                    <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />
                     {/* Camera Guide Overlay — panduan posisi SAJA (tanpa frame).
                         Permintaan operator (2026-09-30): saat pemotretan jangan
                         tampilkan overlay frame; frame baru muncul di layar
@@ -4079,7 +4258,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 {isProcessing && <div className="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-md z-40"><div className="text-center"><RefreshCw size={80} className="animate-spin text-white mb-6 mx-auto" /><h2 className="text-4xl font-bold text-white">Processing...</h2></div></div>}
                 <div className={`absolute right-8 z-20 flex flex-col gap-4 ${isAirTouch ? 'top-12' : 'top-8'}`}>
                         <button id="btn-switch-camera" onClick={toggleCamera} className={`${isAirTouch ? 'w-24 h-24' : 'w-20 h-20'} rounded-full bg-black/40 backdrop-blur-md border-2 border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all active:scale-95`}><SwitchCamera size={isAirTouch?48:40} /></button>
-                        <button id="btn-toggle-cursor-lock-capture" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`${isAirTouch ? 'w-24 h-24' : 'w-20 h-20'} rounded-full backdrop-blur-md border-2 flex items-center justify-center transition-all active:scale-95 ${isCursorLocked ? 'bg-red-500/80 border-red-400 text-white' : 'bg-black/40 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>
+                        {showCursorLockIcon && <button id="btn-toggle-cursor-lock-capture" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`${isAirTouch ? 'w-24 h-24' : 'w-20 h-20'} rounded-full backdrop-blur-md border-2 flex items-center justify-center transition-all active:scale-95 ${isCursorLocked ? 'bg-red-500/80 border-red-400 text-white' : 'bg-black/40 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>}
                 </div>
             </div>
             {/* Bottom controls bar — compact in vertical */}
@@ -4124,7 +4303,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         </div>
       )}
       {step === 'EDIT' && (
-        <BoothWrapper title="Customize Your Photo" subtitle="Pick a frame and filter" hideAdmin isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper title="Customize Your Photo" subtitle="Pick a frame and filter" hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
             {/* VERTICAL: stack preview top + controls bottom. HORIZONTAL: side by side */}
             <div className={`h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
                 {/* Preview area – top in vertical, left in horizontal.
@@ -4231,7 +4410,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'RESULT' && (
-        <BoothWrapper title="Your Photos" subtitle="Ready to share!" onAdminClick={onAdminClick} isLocked={isCursorLocked} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper title="Your Photos" subtitle="Ready to share!" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
             {/* VERTICAL: stack QR top + preview bottom. HORIZONTAL: panel left + preview right */}
             <div className={`h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
                  {/* QR / info panel – left in horizontal, top in vertical */}

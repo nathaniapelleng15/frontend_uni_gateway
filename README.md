@@ -56,3 +56,4 @@ VITE_KIOSK_API_KEY=
 ```
 
 Isi `VITE_KIOSK_API_KEY` dengan key asli dari Admin. Jangan menyalin placeholder. Jika kosong, key dapat dimasukkan langsung pada layar error koneksi.
+# frontend_uni_gateway
