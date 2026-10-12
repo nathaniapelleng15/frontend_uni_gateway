@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAppConfig, saveAppConfig } from '../services/storageService';
 import { checkBackendHealth } from '../services/apiService';
+import { isUsableKioskApiKey, parseAdminKioskCredentials } from '../services/kioskApiKey';
 import { AppConfig } from '../types';
 import { 
   Settings, Save, Key, Wifi, WifiOff, RefreshCw, CheckCircle2, 
@@ -88,7 +89,7 @@ export const KioskSettings: React.FC = () => {
 
   useEffect(() => {
     const config = getAppConfig();
-    setBackendUrl(config.backendUrl || 'http://localhost:8000');
+    setBackendUrl(`${(config.backendUrl || 'http://localhost:8000').replace(/\/+$/, '')}/api/v1`);
     setApiKey(config.apiKey || '');
     setKioskId(config.kioskId || 'K-001');
     setSubtitle(config.customSubtitle || '');
@@ -98,8 +99,8 @@ export const KioskSettings: React.FC = () => {
 
   const handleTestConnection = async () => {
     setConnectionTest('testing');
-    const cleanApiKey = apiKey.trim();
-    const isActive = await checkBackendHealth(backendUrl, cleanApiKey);
+    const credentials = parseAdminKioskCredentials(apiKey);
+    const isActive = await checkBackendHealth(backendUrl, credentials.apiKey);
     setConnectionTest(isActive ? 'connected' : 'disconnected');
   };
 
@@ -129,6 +130,12 @@ export const KioskSettings: React.FC = () => {
     }
 
     // 2. Save complete configuration
+    const credentials = parseAdminKioskCredentials(apiKey);
+    if (!isUsableKioskApiKey(credentials.apiKey)) {
+      setStatus('error');
+      setMessage('DEVICE_TOKEN tidak valid. Salin ulang kredensial dari Admin.');
+      return;
+    }
     const updatedConfig: AppConfig = {
       password: updatedPassword,
       customSubtitle: subtitle,
@@ -136,11 +143,14 @@ export const KioskSettings: React.FC = () => {
       uiMode,
       monitorOrientation,
       backendUrl: backendUrl.trim(),
-      apiKey: apiKey.trim(),
-      kioskId: kioskId.trim()
+      apiKey: credentials.apiKey,
+      kioskId: credentials.kioskId || kioskId.trim()
     };
 
     saveAppConfig(updatedConfig);
+    localStorage.setItem('unismiles_kiosk_api_key', credentials.apiKey);
+    setApiKey(credentials.apiKey);
+    setKioskId(updatedConfig.kioskId);
     
     // Sync credentials with the optional local Kiosk Agent only when explicitly enabled.
     if (String(import.meta.env.VITE_ENABLE_LOCAL_KIOSK_BRIDGE || 'false').toLowerCase() === 'true') {
@@ -159,7 +169,7 @@ export const KioskSettings: React.FC = () => {
     }
 
     setStatus('success');
-    setMessage('Konfigurasi Kiosk berhasil disimpan secara lokal dan disinkronkan ke Agen!');
+    setMessage('Kredensial tersimpan di aplikasi. Koneksi backend sedang diuji.');
     
     // Clear password fields on success
     setCurrentPassword('');
@@ -212,12 +222,10 @@ export const KioskSettings: React.FC = () => {
               <input
                 type="url"
                 required
+                readOnly
                 value={backendUrl}
-                onChange={(e) => {
-                  setBackendUrl(e.target.value);
-                  setConnectionTest('idle');
-                }}
-                className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl focus:border-indigo-500 focus:bg-white focus:outline-none transition-all text-sm"
+                className="w-full px-4 py-3 bg-gray-100 border-2 border-gray-200 rounded-xl text-sm"
+                title="Alamat backend dikunci oleh build desktop"
                 placeholder="http://localhost:8000"
               />
             </div>
@@ -241,6 +249,15 @@ export const KioskSettings: React.FC = () => {
                 type="password"
                 required
                 value={apiKey}
+                onPaste={(event) => {
+                  const text = event.clipboardData.getData('text');
+                  if (!/DEVICE_(?:ID|TOKEN)\s*=/i.test(text)) return;
+                  event.preventDefault();
+                  const credentials = parseAdminKioskCredentials(text);
+                  setApiKey(credentials.apiKey);
+                  if (credentials.kioskId) setKioskId(credentials.kioskId);
+                  setConnectionTest('idle');
+                }}
                 onChange={(e) => {
                   setApiKey(e.target.value);
                   setConnectionTest('idle');

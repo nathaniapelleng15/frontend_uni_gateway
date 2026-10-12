@@ -48,6 +48,8 @@ test('proses utama hidup sampai jendela dibuat (tanpa crash referensi runtime)',
   // tanpa ini interval polling (2 dtk) menjaga event loop hidup dan node --test
   // menggantung sampai timeout (pernah terjadi; lihat mainSmoke.test.cjs).
   const handlerIpc = new Map();
+  let handlerProtokol;
+  let permintaanBackend;
   const electronStub = {
     app: {
       whenReady: () => Promise.resolve(),
@@ -71,7 +73,13 @@ test('proses utama hidup sampai jendela dibuat (tanpa crash referensi runtime)',
       },
     },
     screen: { getPrimaryDisplay: () => ({ workAreaSize: { width: 1080, height: 1920 } }) },
-    protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} },
+    protocol: { registerSchemesAsPrivileged: () => {}, handle: (_scheme, handler) => { handlerProtokol = handler; } },
+    net: { fetch: async (url, options) => {
+      permintaanBackend = { url, options };
+      return new Response(JSON.stringify({ success: false, message: 'invalid key' }), {
+        status: 403, headers: { 'content-type': 'application/json' },
+      });
+    } },
   };
 
   const Module = require('module');
@@ -99,6 +107,18 @@ test('proses utama hidup sampai jendela dibuat (tanpa crash referensi runtime)',
         `dist/ tidak ada tapi UI tidak fallback ke hosting: ${uiDimuat}`,
       );
     }
+
+    assert.ok(handlerProtokol, 'API bridge tidak terdaftar');
+    const req = new Request('app-photobooth://ui/api/v1/kiosk/connection', {
+      headers: { 'x-api-key': 'dummy-test-token', Origin: 'app-photobooth://ui' },
+    });
+    const bridged = await handlerProtokol(req);
+    assert.equal(bridged.status, 403, 'status autentikasi backend tidak boleh disamarkan');
+    assert.equal((await bridged.json()).message, 'invalid key');
+    assert.equal(permintaanBackend.url, 'https://backend-photobooth.uniinside.net/api/v1/kiosk/connection');
+    assert.equal(permintaanBackend.options.headers.get('x-api-key'), 'dummy-test-token');
+    assert.equal(permintaanBackend.options.headers.get('origin'), null);
+    assert.equal(permintaanBackend.options.redirect, 'manual');
 
     // WAJIB: matikan aplikasi lewat jalur keluar resmi supaya semua interval
     // (polling exit-request, countdown) dibersihkan dan node --test bisa keluar.

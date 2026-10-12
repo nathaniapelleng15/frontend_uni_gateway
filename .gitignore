@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+
+# Desktop installers and unpacked build output: upload as GitHub Release assets.
+/release/
 *.local
 
 # Editor directories and files

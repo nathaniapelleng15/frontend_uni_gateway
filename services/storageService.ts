@@ -1,17 +1,20 @@
 import { StickerIcon, AppConfig, STORAGE_KEYS, DEFAULT_PASSWORD, FrameLayout, PhotoFilter, VirtualBackground, GridLayoutId, FrameStyle, FrameBackground } from '../types';
-import { isUsableKioskApiKey } from './apiService';
+import { selectKioskApiKey } from './kioskApiKey';
+import { resolveBackendBaseUrl } from './backendUrl';
+import { transportBaseUrl } from './apiTransport';
 
 // --- CONFIGURATION ---
-// Mendapatkan URL Backend API secara dinamis dari config localStorage (agar langsung terupdate jika diubah di UI Settings)
+// URL dari build adalah sumber utama. URL lama yang tersimpan di localStorage
+// tidak boleh mengarahkan installer ke backend yang berbeda.
 export const getApiBaseUrl = (): string => {
   const stored = localStorage.getItem(STORAGE_KEYS.CONFIG);
+  let storedBackendUrl: unknown = '';
   if (stored) {
     try {
-      const parsed = JSON.parse(stored);
-      if (parsed.backendUrl) return parsed.backendUrl;
+      storedBackendUrl = JSON.parse(stored).backendUrl;
     } catch (_) {}
   }
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+  return transportBaseUrl(resolveBackendBaseUrl(import.meta.env.VITE_API_BASE_URL, storedBackendUrl), window.location.protocol);
 };
 
 // --- Config / Password ---
@@ -22,15 +25,14 @@ export const getAppConfig = (): AppConfig => {
   if (stored) {
     try {
       const parsed = JSON.parse(stored);
-      const apiKey = [registeredKioskApiKey, parsed.apiKey, import.meta.env.VITE_KIOSK_API_KEY]
-        .find(isUsableKioskApiKey) || '';
+      const apiKey = selectKioskApiKey(registeredKioskApiKey, parsed.apiKey, import.meta.env.VITE_KIOSK_API_KEY);
       return {
           password: parsed.password || DEFAULT_PASSWORD,
           customSubtitle: parsed.customSubtitle || '',
           customLogoUrl: parsed.customLogoUrl || '',
           uiMode: parsed.uiMode || 'normal',
           monitorOrientation: parsed.monitorOrientation || 'horizontal',
-          backendUrl: parsed.backendUrl || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+          backendUrl: resolveBackendBaseUrl(import.meta.env.VITE_API_BASE_URL, parsed.backendUrl),
           apiKey,
           kioskId: parsed.kioskId || import.meta.env.VITE_KIOSK_ID || 'K-001'
       };
@@ -38,15 +40,14 @@ export const getAppConfig = (): AppConfig => {
       console.error('Error parsing config', e);
     }
   }
-  const apiKey = [registeredKioskApiKey, import.meta.env.VITE_KIOSK_API_KEY]
-    .find(isUsableKioskApiKey) || '';
+  const apiKey = selectKioskApiKey(registeredKioskApiKey, import.meta.env.VITE_KIOSK_API_KEY);
   const defaultConfig: AppConfig = {
       password: DEFAULT_PASSWORD,
       customSubtitle: '',
       customLogoUrl: '',
       uiMode: 'normal',
       monitorOrientation: 'horizontal',
-      backendUrl: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000',
+      backendUrl: resolveBackendBaseUrl(import.meta.env.VITE_API_BASE_URL, ''),
       apiKey,
       kioskId: import.meta.env.VITE_KIOSK_ID || 'K-001'
   };

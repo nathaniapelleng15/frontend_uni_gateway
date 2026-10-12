@@ -1,4 +1,7 @@
 import axios, { AxiosRequestConfig, AxiosResponse } from 'axios';
+import { isUsableKioskApiKey, selectKioskApiKey } from './kioskApiKey';
+import { apiAdapterForProtocol, transportBaseUrl } from './apiTransport';
+export { isUsableKioskApiKey } from './kioskApiKey';
 
 /**
  * apiService.ts
@@ -26,13 +29,6 @@ const normalizeApiBaseUrl = (value: unknown): string => {
     : getDefaultApiBaseUrl();
 };
 
-export const isUsableKioskApiKey = (value: unknown): boolean => {
-  const apiKey = String(value || '').trim();
-  return Boolean(apiKey)
-    && !/^<[^>]+>$/.test(apiKey)
-    && !/(API_KEY_KIOSK_DARI_ADMIN|YOUR[_ -]?API[_ -]?KEY|CHANGE[_ -]?ME|REPLACE[_ -]?ME|PLACEHOLDER)/i.test(apiKey);
-};
-
 export const getApiConfig = () => {
   const stored = localStorage.getItem('pb_config');
   const registeredKioskApiKey = localStorage.getItem('unismiles_kiosk_api_key')?.trim() || '';
@@ -41,11 +37,11 @@ export const getApiConfig = () => {
     try { parsed = JSON.parse(stored); } catch (_) { parsed = {}; }
   }
   const rawUrl = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL || parsed.backendUrl);
-  const apiKey = [import.meta.env.VITE_KIOSK_API_KEY, registeredKioskApiKey, parsed.apiKey]
-    .find(isUsableKioskApiKey) || '';
+  const requestUrl = transportBaseUrl(rawUrl, window.location.protocol);
+  const apiKey = selectKioskApiKey(registeredKioskApiKey, parsed.apiKey, import.meta.env.VITE_KIOSK_API_KEY);
   return {
-    baseUrl: rawUrl,
-    backendUrl: `${rawUrl}/api/v1/kiosk`,
+    baseUrl: requestUrl,
+    backendUrl: `${requestUrl}/api/v1/kiosk`,
     apiKey,
     kioskId: import.meta.env.VITE_KIOSK_ID || parsed.kioskId || 'K-001'
   };
@@ -215,6 +211,8 @@ apiClient.interceptors.request.use((config) => {
   const appConfig = getApiConfig();
   config.baseURL = appConfig.backendUrl;
   config.headers['x-api-key'] = appConfig.apiKey;
+  // Axios' XHR adapter rejects custom app-photobooth: URLs before any request is sent.
+  if (apiAdapterForProtocol(window.location.protocol)) config.adapter = 'fetch';
   return config;
 });
 
@@ -248,12 +246,13 @@ export const checkBackendHealth = async (url: string, currentApiKey: string): Pr
   if (!isUsableKioskApiKey(apiKey)) return false;
 
   try {
-    const response = await axios.get(`${origin}/api/v1/kiosk/connection`, {
-      headers: { 'x-api-key': apiKey }
+    const response = await axios.get(`${transportBaseUrl(origin, window.location.protocol)}/api/v1/kiosk/connection`, {
+      headers: { 'x-api-key': apiKey },
+      adapter: apiAdapterForProtocol(window.location.protocol)
     });
     return response.status >= 200 && response.status < 300 && response.data?.success !== false;
   } catch (error) {
-    console.error('❌ Backend utama tidak dapat dijangkau / API key tidak valid:', error);
+    console.error('❌ Koneksi backend gagal (tanpa mencetak kredensial):', axios.isAxiosError(error) ? error.response?.status || error.code : 'unknown');
     return false;
   }
 };
@@ -363,11 +362,13 @@ export const completeSession = async (
 export const uploadPhoto = async (
   photoBlob: Blob,
   sessionId: string,
-  filename?: string
+  filename?: string,
+  purpose?: 'print'
 ): Promise<string> => {
   const finalName = filename || `photo-${Date.now()}.png`;
   const formData = new FormData();
   formData.append('photo', photoBlob, finalName);
+  if (purpose === 'print') formData.append('purpose', 'print');
 
   const response = await request<ApiResponse<PhotoData>>({
     method: 'POST',

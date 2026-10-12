@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { getAppConfig, saveAppConfig } from './services/storageService';
 import { checkBackendConnection, isUsableKioskApiKey, KioskApiError } from './services/apiService';
+import { parseAdminKioskCredentials } from './services/kioskApiKey';
 import { KioskSettings } from './components/KioskSettings';
 import { PhotoBooth } from './components/PhotoBooth';
 import { MaintenanceOverlay } from './components/MaintenanceOverlay';
@@ -33,6 +34,7 @@ const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState(() => getAppConfig().apiKey || '');
+  const [pastedKioskId, setPastedKioskId] = useState('');
 
   // Subscribe to Kiosk Agent Maintenance Mode Signal
   useEffect(() => {
@@ -71,17 +73,27 @@ const App: React.FC = () => {
       .finally(() => setIsInitializing(false));
   };
 
+  const handleCredentialsPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const text = event.clipboardData.getData('text');
+    if (!/DEVICE_(?:ID|TOKEN)\s*=/i.test(text)) return;
+    event.preventDefault(); // input type=password discards line breaks before onChange sees them
+    const credentials = parseAdminKioskCredentials(text);
+    setApiKeyInput(credentials.apiKey);
+    setPastedKioskId(credentials.kioskId || '');
+  };
+
   const saveApiKeyAndRetry = (event: React.FormEvent) => {
     event.preventDefault();
-    const apiKey = apiKeyInput.trim();
-    if (!isUsableKioskApiKey(apiKey)) {
-      setBackendError('API key kosong atau masih berupa placeholder. Masukkan API key asli dari Admin.');
+    const credentials = parseAdminKioskCredentials(apiKeyInput);
+    if (!isUsableKioskApiKey(credentials.apiKey)) {
+      setBackendError('API key kosong atau format salinan Admin tidak lengkap. Salin ulang DEVICE_TOKEN dari Admin.');
       return;
     }
 
     const config = getAppConfig();
-    saveAppConfig({ ...config, apiKey });
-    localStorage.setItem('unismiles_kiosk_api_key', apiKey);
+    saveAppConfig({ ...config, apiKey: credentials.apiKey, kioskId: credentials.kioskId || pastedKioskId || config.kioskId });
+    localStorage.setItem('unismiles_kiosk_api_key', credentials.apiKey);
+    setApiKeyInput(credentials.apiKey);
     retryBackendConnection();
   };
 
@@ -133,15 +145,16 @@ const App: React.FC = () => {
         <div className="max-w-xl w-full rounded-2xl border border-red-400/40 bg-red-950/40 p-8 text-center">
           <h1 className="text-2xl font-bold text-red-200">Koneksi photobooth gagal</h1>
           <p className="mt-3 text-red-100/80">{backendError}</p>
-          <p className="mt-2 text-sm text-white/60">Backend: {getAppConfig().backendUrl || 'belum diset'}. Masukkan API key kiosk asli dari Admin.</p>
+          <p className="mt-2 text-sm text-white/60">Backend: {(getAppConfig().backendUrl || 'belum diset').replace(/\/+$/, '')}/api/v1. Tempel kredensial dari tombol Copy API Key di Admin.</p>
           <form onSubmit={saveApiKeyAndRetry} className="mt-6 flex flex-col gap-3 text-left">
             <label htmlFor="kiosk-api-key" className="text-sm font-semibold text-white/80">Kiosk API Key</label>
             <input
               id="kiosk-api-key"
               type="password"
               value={apiKeyInput}
-              onChange={(event) => setApiKeyInput(event.target.value)}
-              placeholder="Paste API key dari Admin"
+              onChange={(event) => { setApiKeyInput(event.target.value); setPastedKioskId(''); }}
+              onPaste={handleCredentialsPaste}
+              placeholder="Tempel Copy API Key dari Admin (DEVICE_ID + DEVICE_TOKEN)"
               autoComplete="off"
               className="w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 font-mono text-sm text-white outline-none focus:border-white/60"
             />

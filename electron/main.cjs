@@ -30,7 +30,7 @@
  */
 const path = require('node:path');
 const fs = require('node:fs');
-const { app, BrowserWindow, ipcMain, session, screen, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, session, screen, protocol, net } = require('electron');
 
 /** UI produksi. Bisa ditimpa untuk uji lokal lewat PHOTOBOOTH_URL. */
 const URL_UI = process.env.PHOTOBOOTH_URL || 'https://photobooth.uniinside.net';
@@ -47,9 +47,8 @@ const URL_UI = process.env.PHOTOBOOTH_URL || 'https://photobooth.uniinside.net';
  * selalu cocok, dan kiosk tidak bergantung pada ketersediaan hosting untuk
  * menampilkan antarmuka.
  *
- * PEMANGGILAN API TETAP KE CLOUD: URL backend ter-bake saat build
- * (VITE_API_BASE_URL → https://api.uniinside.net), jadi memuat UI dari skema
- * custom tidak mengubah tujuan API sama sekali.
+ * API TETAP KE CLOUD: URL backend berasal dari VITE_API_BASE_URL saat build,
+ * jadi memuat UI dari skema custom tidak mengubah tujuan API sama sekali.
  *
  * FALLBACK: bila dist/ tidak ada (installer lama), UI dimuat dari hosting
  * seperti sebelumnya. PHOTOBOOTH_UI=hosting memaksa jalur hosting untuk uji.
@@ -57,6 +56,7 @@ const URL_UI = process.env.PHOTOBOOTH_URL || 'https://photobooth.uniinside.net';
 const SKEMA_UI = 'app-photobooth';
 const URL_UI_LOKAL = `${SKEMA_UI}://ui/index.html`;
 const DIST_DIR = path.join(__dirname, '..', 'dist');
+const BACKEND_PHOTOBOOTH = 'https://backend-photobooth.uniinside.net';
 
 function distTersedia() {
   return fs.existsSync(path.join(DIST_DIR, 'index.html'));
@@ -113,9 +113,31 @@ const MIME_UI = {
 };
 
 function daftarkanProtokolUi() {
-  protocol.handle(SKEMA_UI, (request) => {
+  protocol.handle(SKEMA_UI, async (request) => {
     try {
       const u = new URL(request.url);
+      if (u.hostname === 'ui' && u.pathname.startsWith('/api/')) {
+        // Same-origin API transport: backend baru menolak Origin browser dengan 500.
+        // Hanya URL /api/ ke host tetap ini yang dapat diproxy; jangan teruskan
+        // Origin, cookie, referer, atau redirect ke domain lain bersama API key.
+        const target = new URL(u.pathname + u.search, BACKEND_PHOTOBOOTH);
+        const headers = new Headers();
+        for (const name of ['accept', 'content-type', 'x-api-key']) {
+          const value = request.headers.get(name);
+          if (value) headers.set(name, value);
+        }
+        const method = request.method.toUpperCase();
+        const body = method === 'GET' || method === 'HEAD' ? undefined : Buffer.from(await request.arrayBuffer());
+        const upstream = await net.fetch(target.href, { method, headers, body, redirect: 'manual' });
+        const responseHeaders = new Headers();
+        for (const name of ['content-type', 'cache-control']) {
+          const value = upstream.headers.get(name);
+          if (value) responseHeaders.set(name, value);
+        }
+        return new Response([204, 205, 304].includes(upstream.status) ? null : await upstream.arrayBuffer(), {
+          status: upstream.status, headers: responseHeaders,
+        });
+      }
       let rel = decodeURIComponent(u.pathname);
       if (rel === '/' || rel === '') rel = '/index.html';
       // Normalisasi + tolak path traversal (../) — hanya berkas di dist/.
