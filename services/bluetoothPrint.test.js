@@ -37,6 +37,7 @@ function bodyOf(name, source = BOOTH) {
   const patterns = [
     `const ${name} = async () => {`,
     `const ${name} = async (`,
+    `const ${name} = (`,
   ];
   let start = -1;
   for (const p of patterns) {
@@ -134,7 +135,9 @@ test('helper gambar tidak diduplikasi di dua tempat', () => {
 });
 
 test('pengaturan Admin dipakai di jalur Bluetooth', () => {
-  const fn = bodyOf('printViaBluetoothCore');
+  assert.match(bodyOf('printViaBluetoothCore'), /getNiimbotPrintSettings\(\)/,
+    'Bluetooth harus memakai resolver yang sama dengan preview Niimbot');
+  const fn = bodyOf('getNiimbotPrintSettings');
   // Ukuran kertas dari Admin -> ukuran label.
   assert.match(fn, /labelMmFromPaperSize\(kioskPaperSize\)/,
     'ukuran label harus mengikuti ukuran kertas Admin');

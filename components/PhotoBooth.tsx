@@ -9,6 +9,7 @@ import { getStoredFilters, getLayoutConfig, getStoredBackgrounds, getAppConfig }
 import { useAirGesture } from './useAirGesture';
 import { kioskAgentBridge } from '../services/kioskAgentBridge';
 import { NiimbotPrinter, PRINTER_BELUM_DIPASANGKAN, labelSize as computeLabelSize, labelMmFromPaperSize, labelFrameBox, firstSlot, DEFAULT_ADJUSTMENTS, type PrintAdjustments } from '../services/niimbotPrinter';
+import NiimbotPhotoPreview from './NiimbotPhotoPreview';
 import { paintCover as paintCoverInto, paintPrintImage } from '../services/printImage';
 import { DEFAULT_GRAYSCALE_ALGORITHM, isGrayscaleAlgorithm } from '../services/oneBitImage';
 import { SIGNAGE_URL, IDLE_REDIRECT_MS, shouldArmIdleTimer, isKioskEmbedded, kembaliKeSignage, resolveSignageBaseUrl, postExitRequest } from '../services/idleReturn';
@@ -480,6 +481,17 @@ const convertImageToBase64 = async (url: string): Promise<string> => {
 
 // --- Components ---
 
+const BackButton: React.FC<{ onClick: () => void; uiMode: 'normal' | 'air-touch'; id?: string }> = ({ onClick, uiMode, id }) => (
+  <button
+    id={id}
+    onClick={onClick}
+    className={`flex items-center gap-2 rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20 font-bold ${uiMode === 'air-touch' ? 'px-8 py-6 text-2xl' : 'px-6 py-4'}`}
+    aria-label="Back"
+  >
+    <ChevronLeft size={uiMode === 'air-touch' ? 40 : 28} /> Back
+  </button>
+);
+
 interface BoothWrapperProps {
   children: React.ReactNode;
   title?: string;
@@ -513,20 +525,7 @@ const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, 
             {/* Header actions are absolutely positioned so the title stays centered in the viewport. */}
             {onBack && (
                 <div className={`absolute left-3 top-1/2 -translate-y-1/2 z-20 ${isVertical ? '' : 'md:left-6'}`}>
-                    {/**
-                     * Ukuran & gaya TIRTA tombol Back halaman awal (btn-back-landing):
-                     * pil ChevronLeft + teks dengan padding yang sama per mode
-                     * (px-6 py-4 normal, px-8 py-6 text-2xl air-touch). Sebelumnya
-                     * gambar BACK.png dengan tinggi sendiri (h-12/h-24) sehingga
-                     * tombol kembali terlihat berbeda antar halaman.
-                     */}
-                    <button
-                        onClick={onBack}
-                        className={`flex items-center gap-2 rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20 font-bold ${uiMode === 'air-touch' ? 'px-8 py-6 text-2xl' : 'px-6 py-4'}`}
-                        aria-label="Back"
-                    >
-                        <ChevronLeft size={uiMode === 'air-touch' ? 40 : 28} /> Back
-                    </button>
+                    <BackButton onClick={onBack} uiMode={uiMode} />
                 </div>
             )}
 
@@ -853,7 +852,12 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [packageVisibilityRetry, setPackageVisibilityRetry] = useState(0);
   const [selectedLayoutId, setSelectedLayoutId] = useState<GridLayoutId | null>(null);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
+  const outputCount = selectedPackage === 'print' ? 1 : selectedLayoutId === '2x1' ? 2 : selectedLayoutId === '3x1' ? 3 : 1;
+  const candidateCount = outputCount * 2;
+  const [selectedPhotoIndices, setSelectedPhotoIndices] = useState<number[]>([]);
+  const [selectedOutputPhotos, setSelectedOutputPhotos] = useState<string[]>([]);
   const [selectedPrintPhotoIndex, setSelectedPrintPhotoIndex] = useState<number | null>(null);
+  const [monochromePreviewUrl, setMonochromePreviewUrl] = useState<string | null>(null);
   const [printSelectionConfirmed, setPrintSelectionConfirmed] = useState(false);
 
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilter | null>(null);
@@ -894,6 +898,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   
   // Important: processedFrame holds the version where all asset URLs are converted to Base64
   const [processedFrame, setProcessedFrame] = useState<FrameStyle | null>(null);
+  useEffect(() => {
+    setMonochromePreviewUrl(null);
+  }, [selectedPrintPhotoIndex, selectedPrintPhotoIndex === null ? null : capturedPhotos[selectedPrintPhotoIndex], selectedLayoutId, selectedFrame?.id, processedFrame?.id]);
   const [areAssetsReady, setAreAssetsReady] = useState(false);
   
   // Automatic print state. The ref closes the small gap before React re-renders
@@ -960,53 +967,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
    * kiosk-agent di PC yang sama menariknya. Di kiosk ini agent memang tidak
    * jalan, jadi cetak otomatis tidak pernah sampai ke printer.
    */
-  const prepareSelectedPrintImage = async (): Promise<string> => {
-    if (selectedPackage !== 'print' || step !== 'RESULT' || !printSelectionConfirmed
-      || selectedPrintPhotoIndex === null || !Number.isInteger(selectedPrintPhotoIndex)
-      || selectedPrintPhotoIndex < 0 || !capturedPhotos[selectedPrintPhotoIndex]) {
-      throw new Error('Pilih dan konfirmasi satu foto yang ingin dicetak.');
-    }
-    const image = await generatePrintImage(capturedPhotos[selectedPrintPhotoIndex],
-      processedFrame || selectedFrame, selectedLayoutId, selectedPrintPhotoIndex);
-    if (!image) throw new Error('Gambar cetak gagal disiapkan. Silakan coba lagi.');
-    return image;
-  };
-
-  const printViaBluetoothCore = async (options: { izinkanPasang?: boolean } = {}): Promise<void> => {
-      const image = await prepareSelectedPrintImage();
-
-      const printer = bluetoothPrinterRef.current || new NiimbotPrinter();
-      bluetoothPrinterRef.current = printer;
-
-      if (!printer.isConnected()) {
-        // SATU KLIK CETAK = SAMBUNG DAN CETAK.
-        //
-        // Pemasangan pertama dan sambung-ulang dilayani di tempat yang sama,
-        // supaya tidak ada dua tombol untuk satu maksud dan tidak ada langkah
-        // perantara yang bisa dilewatkan operator:
-        //
-        //   izin sudah ada -> sambung tanpa dialog, langsung cetak
-        //   izin belum ada -> pemilih terbuka DARI KLIK INI (klik cetak sudah
-        //                     gestur pengguna, jadi sah), lalu langsung cetak
-        //
-        // Izin Web Bluetooth tersimpan PER-ALAMAT dan bertahan sendiri; karena
-        // itu pemilih hanya muncul sekali, dan sesudahnya jalur ini tidak lagi
-        // membuka dialog apa pun.
-        const izin = await printer.pairingState();
-        if (izin === 'unsupported') {
-          throw new Error('Browser ini tidak mendukung Web Bluetooth. Pakai Chrome atau Edge, dan buka lewat HTTPS.');
-        }
-        if (izin !== 'ready' && !options.izinkanPasang) {
-          // Pemanggil tanpa klik pengguna (cetak otomatis) TIDAK boleh meminta
-          // perangkat: tanpa gestur, permintaan itu gagal. Jadi MENOLAK, bukan
-          // mencoba lalu gagal — dan pesannya ada di sebelah tombolnya.
-          throw new Error(PRINTER_BELUM_DIPASANGKAN);
-        }
-        const info = await printer.connect(izin === 'ready' ? {} : { forceChooser: true });
-        setBtPrinterName(info.deviceName);
-        void printer.reportStatus('READY', { printerName: info.deviceName });
-      }
-
+  const getNiimbotPrintSettings = () => {
       const mm = labelMmFromPaperSize(kioskPaperSize);
       const size = computeLabelSize(mm.widthMm, mm.heightMm);
 
@@ -1071,6 +1032,57 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         sharpen: Math.max(0, Math.min(100, Number(photoAdjust.sharpen) || 0)),
       };
 
+      return {size, adjustments};
+  };
+
+  const prepareSelectedPrintImage = async (): Promise<string> => {
+    if (selectedPackage !== 'print' || step !== 'RESULT' || !printSelectionConfirmed
+      || selectedPrintPhotoIndex === null || !Number.isInteger(selectedPrintPhotoIndex)
+      || selectedPrintPhotoIndex < 0 || !capturedPhotos[selectedPrintPhotoIndex]) {
+      throw new Error('Pilih dan konfirmasi satu foto yang ingin dicetak.');
+    }
+    const image = await generatePrintImage(capturedPhotos[selectedPrintPhotoIndex],
+      processedFrame || selectedFrame, selectedLayoutId, 0);
+    if (!image) throw new Error('Gambar cetak gagal disiapkan. Silakan coba lagi.');
+    return image;
+  };
+
+  const printViaBluetoothCore = async (options: { izinkanPasang?: boolean } = {}): Promise<void> => {
+      const image = await prepareSelectedPrintImage();
+
+      const printer = bluetoothPrinterRef.current || new NiimbotPrinter();
+      bluetoothPrinterRef.current = printer;
+
+      if (!printer.isConnected()) {
+        // SATU KLIK CETAK = SAMBUNG DAN CETAK.
+        //
+        // Pemasangan pertama dan sambung-ulang dilayani di tempat yang sama,
+        // supaya tidak ada dua tombol untuk satu maksud dan tidak ada langkah
+        // perantara yang bisa dilewatkan operator:
+        //
+        //   izin sudah ada -> sambung tanpa dialog, langsung cetak
+        //   izin belum ada -> pemilih terbuka DARI KLIK INI (klik cetak sudah
+        //                     gestur pengguna, jadi sah), lalu langsung cetak
+        //
+        // Izin Web Bluetooth tersimpan PER-ALAMAT dan bertahan sendiri; karena
+        // itu pemilih hanya muncul sekali, dan sesudahnya jalur ini tidak lagi
+        // membuka dialog apa pun.
+        const izin = await printer.pairingState();
+        if (izin === 'unsupported') {
+          throw new Error('Browser ini tidak mendukung Web Bluetooth. Pakai Chrome atau Edge, dan buka lewat HTTPS.');
+        }
+        if (izin !== 'ready' && !options.izinkanPasang) {
+          // Pemanggil tanpa klik pengguna (cetak otomatis) TIDAK boleh meminta
+          // perangkat: tanpa gestur, permintaan itu gagal. Jadi MENOLAK, bukan
+          // mencoba lalu gagal — dan pesannya ada di sebelah tombolnya.
+          throw new Error(PRINTER_BELUM_DIPASANGKAN);
+        }
+        const info = await printer.connect(izin === 'ready' ? {} : { forceChooser: true });
+        setBtPrinterName(info.deviceName);
+        void printer.reportStatus('READY', { printerName: info.deviceName });
+      }
+
+      const {size, adjustments} = getNiimbotPrintSettings();
       await printer.print(image, size, 1, adjustments);
   };
 
@@ -1376,6 +1388,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [sessionCode, setSessionCode] = useState<string>('');
   // New captures/retakes and sessions invalidate any previously confirmed choice.
   useEffect(() => {
+    setSelectedPhotoIndices([]);
+    setSelectedOutputPhotos([]);
     setSelectedPrintPhotoIndex(null);
     setPrintSelectionConfirmed(false);
   }, [capturedPhotos, sessionCode, selectedPackage]);
@@ -2183,11 +2197,21 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setSelectedPackage(pkg);
       setStep('LAYOUT');
   };
+  // Layout slots are the customer-facing strip count, not the candidate count.
+  const isWorkflowLayoutAllowed = (id: GridLayoutId): boolean => {
+    const count = id === '1x1' ? 1 : id === '2x1' ? 2 : id === '3x1' ? 3 : 0;
+    if (!selectedPackage || !count || (selectedPackage === 'print' && count !== 1)) return false;
+    if (allowedLayouts?.length && !allowedLayouts.includes(id)) return false;
+    const layout = frames.find(frame => frame.id === id && frame.enabled);
+    return !!layout?.styles.some(style => getEffectiveLayoutConfig(style, id).slots.length === count);
+  };
   const handleLayoutSelect = async (id: GridLayoutId) => { 
+    if (!isWorkflowLayoutAllowed(id)) return;
     setFlowError(null);
     setPaymentPollingState('checking');
     setSelectedLayoutId(id); 
-    const availableStyles = frames.filter(frame => frame.id === id).flatMap(frame => frame.styles);
+    const availableStyles = frames.filter(frame => frame.id === id).flatMap(frame => frame.styles)
+      .filter(style => getEffectiveLayoutConfig(style, id).slots.length === Number(id[0]));
     // Select the first style of the new layout immediately. Do not leave the
     // previous layout's frame active while payment/capture screens load.
     setSelectedFrame(availableStyles[0] || null);
@@ -2732,36 +2756,47 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, [step, paymentMethod]);
 
   const handleFinish = () => {
-    const singlePhoto = selectedPackage === 'print' && capturedPhotos.length === 1;
-    setSelectedPrintPhotoIndex(singlePhoto ? 0 : null);
-    setPrintSelectionConfirmed(singlePhoto);
-    setStep(selectedPackage === 'print' && !singlePhoto ? 'PRINT_SELECTION' : 'RESULT');
+    if (step !== 'EDIT' || !printSelectionConfirmed || selectedOutputPhotos.length !== outputCount) return;
+    setStep('RESULT');
     setIsResultPanelCollapsed(window.innerWidth < 1280);
   };
 
 
+  const handlePhotoSelection = (index: number) => {
+    if (step !== 'PRINT_SELECTION' || printSelectionConfirmed || isPrintActive
+      || printActionInFlightRef.current || !Number.isInteger(index) || index < 0 || !capturedPhotos[index]) return;
+    setSelectedPhotoIndices(prev => {
+      if (prev.includes(index)) return prev;
+      if (prev.length < outputCount) return [...prev, index];
+      return [...prev.slice(0, Math.max(0, outputCount - 1)), index];
+    });
+  };
+
   const handleConfirmPrintSelection = () => {
-    if (step !== 'PRINT_SELECTION' || selectedPackage !== 'print'
+    if (step !== 'PRINT_SELECTION' || !selectedPackage || printSelectionConfirmed
       || printActionInFlightRef.current || isPrintActive
       || btPrintState === 'connecting' || btPrintState === 'printing') return;
-    if (selectedPrintPhotoIndex === null || !Number.isInteger(selectedPrintPhotoIndex)
-      || selectedPrintPhotoIndex < 0 || !capturedPhotos[selectedPrintPhotoIndex]) return;
+    if (capturedPhotos.length !== candidateCount || selectedPhotoIndices.length !== outputCount
+      || new Set(selectedPhotoIndices).size !== outputCount
+      || selectedPhotoIndices.some(index => !Number.isInteger(index) || index < 0 || !capturedPhotos[index])) return;
+    setSelectedOutputPhotos(selectedPhotoIndices.map(index => capturedPhotos[index]));
+    setSelectedPrintPhotoIndex(selectedPackage === 'print' ? selectedPhotoIndices[0] : null);
     setPrintSelectionConfirmed(true);
-    setStep('RESULT');
+    setStep('EDIT');
   };
 
   const startAutoCapture = () => {
-    if (captureExpired) return;
+    if (captureExpired || reviewPhotoIndex !== null) return;
     if (!captureDeadline && selectedLayoutId) {
-      const slotCount = getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length;
-      const durationSeconds = getCaptureDurationSeconds(slotCount);
+      const durationSeconds = getCaptureDurationSeconds(candidateCount);
       setCaptureDeadline(Date.now() + durationSeconds * 1000);
       setRemainingCaptureSeconds(durationSeconds);
     }
     setIsAutoCapturing(true);
   };
   const takePhoto = useCallback(() => {
-    if (!processingCanvasRef.current) return;
+    if (!processingCanvasRef.current || reviewPhotoIndex !== null
+      || (retakeIndex === null && capturedPhotos.length >= candidateCount)) return;
     if (captureDeadline !== null && Date.now() >= captureDeadline) {
       setCountdown(null);
       setIsAutoCapturing(false);
@@ -2784,16 +2819,16 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     photoCtx.scale(-1, 1);
     photoCtx.drawImage(canvas, 0, 0);
     const photo = photoCanvas.toDataURL('image/jpeg', 0.95);
-    const photoIndex = retakeIndex === null ? capturedPhotos.length : retakeIndex;
+    const capturedIndex = retakeIndex ?? capturedPhotos.length;
     setCapturedPhotos(prev => retakeIndex === null
       ? [...prev, photo]
       : prev.map((existingPhoto, index) => index === retakeIndex ? photo : existingPhoto)
     );
     setCountdown(null);
     setRetakeIndex(null);
+    setReviewPhotoIndex(capturedIndex);
     setIsAutoCapturing(false);
-    setReviewPhotoIndex(photoIndex);
-  }, [captureDeadline, retakeIndex, capturedPhotos.length]);
+  }, [captureDeadline, retakeIndex, capturedPhotos.length, candidateCount, reviewPhotoIndex]);
 
   // Keep one session clock running while the user is taking or retaking photos.
   useEffect(() => {
@@ -2829,13 +2864,13 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         }
         return;
     }
-    if (capturedPhotos.length >= config.slots.length) {
-        setIsAutoCapturing(false); setIsProcessing(true);
-        setTimeout(() => { setStep('EDIT'); setIsProcessing(false); }, 1000);
+    if (capturedPhotos.length >= candidateCount) {
+        setIsAutoCapturing(false);
+        setStep('PRINT_SELECTION');
         return;
     }
     if (countdown === null && !flash) setCountdown(3); 
-  }, [isAutoCapturing, capturedPhotos.length, step, selectedLayoutId, countdown, flash, retakeIndex, reviewPhotoIndex]);
+  }, [isAutoCapturing, capturedPhotos.length, candidateCount, step, selectedLayoutId, countdown, flash, retakeIndex, reviewPhotoIndex]);
 
   useEffect(() => {
     if (countdown === null) return;
@@ -2847,6 +2882,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, [countdown, takePhoto]);
 
   const handleRetake = () => {
+    if (isPrintActive || printActionInFlightRef.current || printState === 'success' || btPrintState === 'done' || uploadStatus === 'uploading') return;
     setCapturedPhotos([]); 
     setIsAutoCapturing(false); 
     setRetakeIndex(null);
@@ -2879,7 +2915,17 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   };
 
   const handleRetakePhoto = (index: number) => {
-    if (captureExpired) return;
+    const reviewingCurrentPhoto = step === 'CAPTURE' && reviewPhotoIndex === index;
+    if ((step !== 'PRINT_SELECTION' && !reviewingCurrentPhoto) || printSelectionConfirmed || isPrintActive || printActionInFlightRef.current
+      || !Number.isInteger(index) || index < 0 || !capturedPhotos[index]) return;
+    if (captureExpired || (captureDeadline !== null && Date.now() >= captureDeadline)) {
+      setCaptureExpired(true);
+      return;
+    }
+    setSelectedPhotoIndices([]);
+    setSelectedOutputPhotos([]);
+    setSelectedPrintPhotoIndex(null);
+    setPrintSelectionConfirmed(false);
     if (retakeReadyTimer.current !== null) { clearTimeout(retakeReadyTimer.current); retakeReadyTimer.current = null; }
     setRetakeIndex(index);
     setReviewPhotoIndex(null);
@@ -2889,17 +2935,18 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   };
 
   const handleContinueAfterReview = () => {
-    setReviewPhotoIndex(null);
-    const slotCount = selectedLayoutId
-      ? getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length
-      : 0;
-
-    if (capturedPhotos.length >= slotCount) {
-      setIsProcessing(true);
-      setTimeout(() => { setStep('EDIT'); setIsProcessing(false); }, 700);
+    if (step !== 'CAPTURE' || reviewPhotoIndex === null || !capturedPhotos[reviewPhotoIndex]) return;
+    if (capturedPhotos.length >= candidateCount) {
+      setReviewPhotoIndex(null);
+      setIsAutoCapturing(false);
+      setStep('PRINT_SELECTION');
       return;
     }
-
+    if (captureExpired || (captureDeadline !== null && Date.now() >= captureDeadline)) {
+      setCaptureExpired(true);
+      return;
+    }
+    setReviewPhotoIndex(null);
     setIsAutoCapturing(true);
   };
 
@@ -2961,7 +3008,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   // --- Final Image Generation (Canvas API — pixel-perfect at output resolution) ---
   const generateCompositeImage = async (): Promise<string | null> => {
-    if (!selectedLayoutId || capturedPhotos.length === 0) return null;
+    if (!selectedLayoutId || !printSelectionConfirmed || selectedOutputPhotos.length !== outputCount) return null;
     const frameToUse = processedFrame || selectedFrame;
     const config = getEffectiveLayoutConfig(frameToUse, selectedLayoutId);
 
@@ -3023,7 +3070,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       // 3 — Photos, positioned using the Admin slot coordinates.
       for (let i = 0; i < config.slots.length; i++) {
         const slot = config.slots[i];
-        const photo = capturedPhotos[i];
+        const photo = selectedOutputPhotos[i];
         if (!photo) continue;
         try {
           const img = await loadImg(photo);
@@ -3111,14 +3158,16 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       const uploadPromise = (async (): Promise<string | null> => {
         try {
           if (!sessionCode) throw new KioskApiError('Sesi belum dibuat di backend.');
-          if (capturedPhotos.length === 0) throw new KioskApiError('Tidak ada foto untuk diupload.');
+          if (!printSelectionConfirmed || selectedOutputPhotos.length !== outputCount) throw new KioskApiError('Konfirmasi foto pilihan sebelum upload.');
 
           setUploadStatus('uploading');
           setUploadError(null);
           setFinalUploadedUrl(null);
           setDownloadUrl(null);
 
-          // Raw photos must be stored before the final strip/frame.
+          // Keep every camera original in the session download gallery. The
+          // selected-only framed image below remains the final digital result;
+          // print derivatives use the isolated print purpose in the print path.
           for (let i = 0; i < capturedPhotos.length; i += 1) {
               const rawResponse = await fetch(capturedPhotos[i]);
               const rawBlob = await rawResponse.blob();
@@ -3286,7 +3335,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
           const printConfig = getEffectiveLayoutConfig(processedFrame || selectedFrame, selectedLayoutId);
           const printHeight = 6;
-          const slot = printConfig.slots[selectedPrintPhotoIndex!];
+          const slot = printConfig.slots[0];
           const printWidth = printHeight * (slot.width / slot.height);
           const win = window.open('', '_blank');
           if (!win) throw new Error('Jendela print diblokir browser.');
@@ -3389,7 +3438,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
           // Never assign this URL to finalUploadedUrl or downloadUrl.
           const printBlob = await (await fetch(printImage)).blob();
           const imageUrl = await uploadPhoto(printBlob, sessionCode, `${sessionCode}_print_${selectedPrintPhotoIndex! + 1}.png`, 'print');
-          const printSlot = printConfig.slots[selectedPrintPhotoIndex!];
+          const printSlot = printConfig.slots[0];
           const job = await queuePrintJob(sessionCode, {
               image_url: imageUrl,
               copies: 1,
@@ -3509,7 +3558,54 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, [startPrintPolling]);
 
   // --- Rendering Helpers ---
-  const PreviewComponent = ({ shadow = true, maxHeightStr = '65vh', id }: { shadow?: boolean, maxHeightStr?: string, id?: string }) => {
+  // Each strip has two candidates. Review the corresponding output slot,
+  // never use the candidate index as a slot index (candidate 2 is still slot 0).
+  const getReviewPhotoSlot = (candidateIndex: number) => {
+    const config = getEffectiveLayoutConfig(selectedFrame, selectedLayoutId);
+    return config.slots[Math.min(Math.floor(candidateIndex / 2), config.slots.length - 1)];
+  };
+  // The mono display crop follows the exact effective frame used by the color
+  // composition and physical photo preparation, not a stale selection snapshot.
+  const getSelectedPrintPreviewSlot = () => getEffectiveLayoutConfig(
+    processedFrame || selectedFrame, selectedLayoutId,
+  ).slots[0];
+
+  const getSelectionPhotoSlot = (candidateIndex: number) => {
+    const config = getEffectiveLayoutConfig(selectedFrame, selectedLayoutId);
+    const selectedPosition = selectedPhotoIndices.indexOf(candidateIndex);
+    const outputPosition = selectedPosition >= 0 ? selectedPosition : selectedPhotoIndices.length;
+    return config.slots[Math.min(outputPosition, config.slots.length - 1)];
+  };
+
+
+  const SelectionPhotoPreview = ({ photo, index }: { photo: string; index: number }) => {
+    const slot = getSelectionPhotoSlot(index);
+    if (!slot) return null;
+    return (
+      <div className="relative w-full overflow-hidden" style={{ aspectRatio: `${slot.width} / ${slot.height}` }}>
+        <img src={photo} alt={`Foto ${index + 1}`} className="absolute inset-0 h-full w-full object-cover object-center" />
+      </div>
+    );
+  };
+
+  const ReviewPhotoPreview = ({ index }: { index: number }) => {
+    const slot = getReviewPhotoSlot(index);
+    if (!slot) return null;
+    const maxHeight = isVertical ? '40vh' : '45vh';
+    return (
+      <div id="photo-review-crop" className="relative w-full overflow-hidden rounded-xl" style={{ aspectRatio: `${slot.width} / ${slot.height}`, maxWidth: `calc(${maxHeight} * ${slot.width / slot.height})` }}>
+        <img id="photo-review-frame" src={capturedPhotos[index]} alt={`Hasil foto ${index + 1}`} className="absolute inset-0 h-full w-full object-cover object-center" />
+      </div>
+    );
+  };
+
+  const renderCameraLivePreview = () => <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />;
+
+  const renderCandidatePreview = (index: number, review = false) => review
+    ? <ReviewPhotoPreview index={index} />
+    : <SelectionPhotoPreview photo={capturedPhotos[index]} index={index} />;
+
+  const PreviewComponent = ({ shadow = true, maxHeightStr = '65vh', id, monochromePhotoUrl }: { shadow?: boolean, maxHeightStr?: string, id?: string, monochromePhotoUrl?: string | null }) => {
     // The Customize screen must show the Admin slot placeholders before any
     // photo is captured. Only the layout selection is required to render the
     // frame preview; an empty photo array is a valid initial state.
@@ -3609,13 +3705,15 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                         />
                     )}
                     {config.slots.map((slot, i) => {
-                        const photo = capturedPhotos[i];
+                        const photo = monochromePhotoUrl !== undefined
+                          ? (i === 0 ? (monochromePhotoUrl || undefined) : undefined)
+                          : selectedOutputPhotos[i];
                         const slotBorder = getSlotBorderConfig(frameToRender);
                         return (
                             <div key={i} className="absolute overflow-hidden flex items-center justify-center" style={{ left: `${(slot.x / config.width) * 100}%`, top: `${(slot.y / config.height) * 100}%`, width: `${(slot.width / config.width) * 100}%`, height: `${(slot.height / config.height) * 100}%`, zIndex: 1, boxSizing: 'border-box', border: `${Math.max(1, slotBorder.width * scaleFactor)}px solid ${slotBorder.color}`, backgroundColor: photo ? 'transparent' : 'rgba(156, 163, 175, 0.48)' }}>
                                 {photo ? (
                                     /* Captured photos are Data URIs, so no CORS is needed. */
-                                    <img src={photo} className="w-full h-full object-cover" style={{ filter: selectedFilter?.cssFilter || 'none' }} />
+                                    <img src={photo} className="w-full h-full object-cover" style={{ filter: i === 0 && monochromePhotoUrl ? 'none' : selectedFilter?.cssFilter || 'none' }} />
                                 ) : (
                                     <span className="font-bold text-white/75" style={{ fontSize: `${Math.max(12, 42 * scaleFactor)}px` }}>{i + 1}</span>
                                 )}
@@ -3759,11 +3857,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
               </div>
             </div>
             <div className="absolute top-8 left-8 flex gap-4 z-50">
-               {/* Tombol Back di halaman pertama: keluar ke signage, bukan mundur
-                   ke layar lain. */}
-               <button id="btn-back-landing" onClick={goToSignage} className={`flex items-center gap-2 rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20 font-bold ${isAirTouch ? 'px-8 py-6 text-2xl' : 'px-6 py-4'}`}>
-                 <ChevronLeft size={isAirTouch ? 40 : 28} /> Back
-               </button>
+               <BackButton id="btn-back-landing" onClick={goToSignage} uiMode={uiMode} />
             </div>
             <div className="absolute top-8 right-8 flex gap-4 z-50">
                {showCursorLockIcon && <button id="btn-toggle-cursor-lock-landing" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`rounded-full backdrop-blur-sm transition-colors border-2 ${isAirTouch ? 'p-6' : 'p-4'} ${isCursorLocked ? 'bg-red-500/20 border-red-400 text-white' : 'bg-white/10 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>}
@@ -3808,7 +3902,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                   >
                     <Printer size={64} />
                     <h3 className="text-3xl font-black">Print + Digital</h3>
-                    <p className="text-center font-medium opacity-80">Get a physical copy and digital download</p>
+                    <p className="text-center font-medium opacity-80">1 strip cetak + salinan digital · 2 kali foto · pilih 1</p>
                   </button>
                 )}
                 {packageVisibility.digital && (
@@ -3818,7 +3912,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                   >
                     <Download size={64} />
                     <h3 className="text-3xl font-black">Digital Only</h3>
-                    <p className="text-center text-white/70">Softcopy only, sent to your email or phone</p>
+                    <p className="text-center text-white/70">1–3 strip · 2/4/6 kali foto · pilih hasil digital</p>
                   </button>
                 )}
               </div>
@@ -3827,13 +3921,12 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'LAYOUT' && (
-        <BoothWrapper title="Choose Layout" subtitle="Tap to select your format" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => { setPackageVisibilityStatus('loading'); setStep('PACKAGE'); }} isVertical={isVertical}>
+        <BoothWrapper title="Pilih Jumlah Strip" subtitle={selectedPackage === 'print' ? 'Print: 1 strip, ambil 2 foto lalu pilih 1.' : 'Digital: pilih 1–3 strip, ambil 2 foto untuk setiap strip.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => { setPackageVisibilityStatus('loading'); setStep('PACKAGE'); }} isVertical={isVertical}>
             <div className={`h-full flex flex-col ${isVertical ? 'p-4' : isAirTouch ? 'p-10' : 'p-6 md:p-10'}`}>
                 <div className={`flex-1 overflow-y-auto flex items-center justify-center`}>{/* Kontainer diperlebar (2026-09-30): kartu layout tadinya kecil — max-w-xs di vertikal hanya ~320px (kartu ~154px), max-w-4xl di horizontal. Semua mode naik satu-dua tingkat supaya pratinjau layout terbaca jelas dari jarak pengunjung. */}
                     <div className={`flex flex-wrap justify-center items-center w-full mx-auto ${isVertical ? 'gap-3 max-w-md pt-2 pb-4' : isAirTouch ? 'gap-10 md:gap-14 max-w-6xl' : 'gap-5 md:gap-8 max-w-5xl lg:max-w-6xl pb-6'}`}>
-                        {[{id: '1x1', label: 'Polaroid', count: 1}, {id: '2x1', label: 'Strip (2)', count: 2}, {id: '3x1', label: 'Strip (3)', count: 3}, {id: '4x1', label: 'Strip (4)', count: 4}, {id: '2x2', label: 'Grid (4)', count: 4}, {id: '2x3', label: 'Grid (6)', count: 6}, {id: '3x3', label: 'Grid (9)', count: 9}]
-                        .filter(layout => frames.find(f => f.id === layout.id)?.enabled)
-                        .filter(layout => !allowedLayouts || allowedLayouts.length === 0 || allowedLayouts.includes(layout.id))
+                        {[{id: '1x1', label: '1 strip', count: 1}, {id: '2x1', label: '2 strip', count: 2}, {id: '3x1', label: '3 strip', count: 3}]
+                        .filter(layout => isWorkflowLayoutAllowed(layout.id as GridLayoutId))
                         .map((layout) => (
                             <button 
                               key={layout.id} 
@@ -3849,7 +3942,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                 <span className={`font-bold tracking-wide ${isVertical ? 'text-sm' : isAirTouch ? 'text-2xl md:text-3xl' : 'text-base md:text-xl'}`}>{layout.label}</span>
                                 <span className="text-sm font-bold text-[#f6cd46]">
                                   {(() => {
-                                    const style = (frames.find(frame => frame.id === layout.id) as any)?.styles?.[0];
+                                    const style = (frames.find(frame => frame.id === layout.id) as any)?.styles?.find((candidate: FrameStyle) => getEffectiveLayoutConfig(candidate, layout.id).slots.length === layout.count);
                                     const value = positiveNumber(style?.[selectedPackage === 'digital' ? 'digital_price' : 'digital_print_price'], style?.price);
                                     return value === null ? 'Harga belum tersedia' : `Rp ${value.toLocaleString('id-ID')}`;
                                   })()}
@@ -3892,7 +3985,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                               : new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(payableAmount)}
                                         </span>
                                     </div>
-                                    <p className="mb-2 text-xs font-bold text-gray-500">{selectedPackage === 'digital' ? 'Paket Digital' : 'Paket Digital & Print'}</p>
+                                    <p className="mb-2 text-xs font-bold text-gray-500">{selectedPackage === 'digital' ? 'Paket Digital' : 'Paket Digital + Print'}</p>
                                     {uniqueCode !== null && (
                                       <div className="w-full mb-2 px-2 text-[11px] md:text-xs font-bold text-gray-500 text-center uppercase tracking-wider">
                                         Kode unik transaksi: <span className="text-[#00aead] font-black">+{uniqueCode}</span>
@@ -3998,12 +4091,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
                 </div>
 
-                {/* Back Button */}
-                 <div className="absolute top-6 left-6 z-50">
-                     <button onClick={() => setStep('LAYOUT')} className="active:scale-95 hover:scale-110 transition-all outline-none">
-                         <img src="/assets/BACK.png" alt="Back" className="h-20 md:h-24 object-contain drop-shadow-md" />
-                     </button>
-                 </div>
+                <div className="absolute top-6 left-6 z-50">
+                    <BackButton onClick={() => setStep('LAYOUT')} uiMode={uiMode} />
+                </div>
              </div>
         </BoothWrapper>
       )}
@@ -4180,17 +4270,14 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
               </div>
             </div>
 
-            {/* Back Button */}
             <div className="absolute top-4 left-4 sm:top-6 sm:left-6 z-50">
-              <button 
+              <BackButton
                 onClick={() => {
                   setStep('PAYMENT');
                   handleResetScan();
-                }} 
-                className="active:scale-95 hover:scale-110 transition-all outline-none"
-              >
-                <img src="/assets/BACK.png" alt="Back" className="h-16 sm:h-20 md:h-24 object-contain drop-shadow-md" />
-              </button>
+                }}
+                uiMode={uiMode}
+              />
             </div>
           </div>
         </BoothWrapper>
@@ -4217,15 +4304,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         <div className="h-full w-full bg-black relative overflow-hidden flex flex-col">
             <div className={`fixed inset-0 bg-white z-[100] pointer-events-none duration-0 ${flash ? 'opacity-100' : 'opacity-0'}`} />
                 <div className="relative flex-1 w-full bg-black overflow-hidden">
-                    <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />
-                    {/* Camera Guide Overlay — panduan posisi SAJA (tanpa frame).
-                        Permintaan operator (2026-09-30): saat pemotretan jangan
-                        tampilkan overlay frame; frame baru muncul di layar
-                        konfirmasi. Yang tersisa hanya kotak putus-putus dengan
-                        rasio slot berikutnya agar pengunjung tahu ke mana berdiri. */}
+                    {renderCameraLivePreview()}
+                    {/* Camera guide overlay shared by Print and Digital on the live preview only. */}
                     {step === 'CAPTURE' && selectedLayoutId && (() => {
                         const config = getEffectiveLayoutConfig(processedFrame || selectedFrame, selectedLayoutId);
-                        const idx = retakeIndex !== null ? retakeIndex : Math.min(capturedPhotos.length, config.slots.length - 1);
+                        const idx = (retakeIndex ?? capturedPhotos.length) % config.slots.length;
                         const slot = config.slots[idx];
                         if (!slot) return null;
                         const isPortrait = slot.width < slot.height;
@@ -4251,6 +4334,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                           </div>
                         );
                     })()}
+
                     {countdown !== null && <div id="countdown-display" className="absolute inset-0 flex items-center justify-center z-30"><span className="text-[20rem] font-bold text-white drop-shadow-[0_10px_20px_rgba(0,0,0,0.8)] animate-bounce font-display">{countdown}</span></div>}
                     {captureDeadline !== null ? (
                       <div className={`absolute left-8 z-20 rounded-xl border px-4 py-2 backdrop-blur-md font-mono font-bold ${remainingCaptureSeconds <= 30 ? 'border-red-400 bg-red-500/40 text-red-100' : 'border-white/20 bg-black/40 text-white'}`} style={{ top: isAirTouch ? '3rem' : '2rem' }}>
@@ -4258,12 +4342,15 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                       </div>
                     ) : selectedLayoutId ? (
                       <div className="absolute left-8 top-8 z-20 rounded-xl border border-white/20 bg-black/40 px-4 py-2 text-sm font-bold text-white/80 backdrop-blur-md">
-                        Batas sesi: {formatCaptureTime(getCaptureDurationSeconds(getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length))}
+                        Batas sesi: {formatCaptureTime(getCaptureDurationSeconds(candidateCount))}
                       </div>
                     ) : null}
                     {captureExpired && (
                       <div className="absolute inset-x-0 bottom-6 z-30 flex justify-center pointer-events-none">
-                        <span className="rounded-xl bg-red-600/90 px-5 py-3 text-sm font-bold text-white shadow-xl">Waktu pemotretan habis</span>
+                        <div className="flex items-center gap-3 pointer-events-auto">
+                          <span className="rounded-xl bg-red-600/90 px-5 py-3 text-sm font-bold text-white shadow-xl">Waktu pemotretan habis</span>
+                          <button id="btn-restart-expired-capture" onClick={handleRetake} className="rounded-xl bg-white px-5 py-3 font-bold text-black">Ulang Semua Foto</button>
+                        </div>
                       </div>
                     )}
                     {reviewPhotoIndex !== null && capturedPhotos[reviewPhotoIndex] && (
@@ -4272,27 +4359,31 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                           <p className="text-center text-lg font-bold text-white md:text-2xl">
                             Foto {reviewPhotoIndex + 1} berhasil diambil
                           </p>
-                          {/* Konfirmasi kini menampilkan komposisi BERFRAME yang
-                              sama dengan hasil cetak (PreviewComponent), bukan foto
-                              mentah tanpa frame. Foto yang baru diambil sudah masuk
-                              di slotnya; slot lain tampil sebagai placeholder. */}
-                          <div className="flex w-full justify-center">
-                            <PreviewComponent shadow maxHeightStr={isVertical ? '40vh' : '55vh'} id="photo-review-frame" />
+                          <p className="text-center text-sm text-white/70">Periksa foto ini: retake atau konfirmasi untuk melanjutkan.</p>
+                          <div className="flex w-full min-h-0 justify-center">
+                            {renderCandidatePreview(reviewPhotoIndex, true)}
                           </div>
                           <div className="flex w-full gap-3">
                             <button
+                              id="btn-retake-review-photo"
+                              disabled={captureExpired}
                               onClick={() => handleRetakePhoto(reviewPhotoIndex)}
                               className="flex-1 rounded-xl border border-white/25 bg-white/10 px-4 py-6 text-lg font-bold text-white transition-colors hover:bg-white/20 active:scale-95"
                             >
                               Retake Foto
                             </button>
                             <button
+                              id="btn-continue-review-photo"
+                              disabled={captureExpired && capturedPhotos.length < candidateCount}
                               onClick={handleContinueAfterReview}
                               className="flex-1 rounded-xl bg-white px-4 py-6 text-lg font-bold text-[#0c1633] transition-colors hover:bg-gray-100 active:scale-95"
                             >
-                              {capturedPhotos.length >= (selectedLayoutId ? getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length : 0) ? 'Lanjut' : 'Foto Berikutnya'}
+                              {capturedPhotos.length >= candidateCount ? 'Lanjut Pilih Hasil' : `Lanjut Foto ${capturedPhotos.length + 1}`}
                             </button>
                           </div>
+                          {captureExpired && capturedPhotos.length < candidateCount && (
+                            <button id="btn-restart-expired-review" onClick={handleRetake} className="w-full rounded-xl bg-red-600 px-4 py-3 font-bold text-white">Waktu habis — Ulang Semua Foto</button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -4307,9 +4398,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 <div className="flex justify-between items-center h-full gap-2">
                     {/* Thumbnails */}
                     <div className={`flex gap-1.5 overflow-x-auto items-center h-full ${isVertical ? 'py-1.5' : 'py-2 gap-2'}`}>
-                        {Array.from({length: (selectedLayoutId ? getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length : 0)}).map((_, i) => (
+                        {Array.from({length: candidateCount}).map((_, i) => (
                             <div key={i} className={`flex-shrink-0 rounded-lg border-2 flex items-center justify-center overflow-hidden bg-white/5 ${capturedPhotos[i] ? 'border-green-400' : 'border-white/20'} ${isVertical ? 'w-10 h-14' : 'w-16 h-24 md:w-24 md:h-32'}`}>
-                                {capturedPhotos[i] ? <img src={capturedPhotos[i]} className="w-full h-full object-cover" /> : <span className={`text-white/30 font-bold ${isVertical ? 'text-sm' : 'text-lg'}`}>{i + 1}</span>}
+                                {capturedPhotos[i] ? <img src={capturedPhotos[i]} alt={`Foto ${i + 1}`} className="w-full h-full object-cover object-center" /> : <span className={`text-white/30 font-bold ${isVertical ? 'text-sm' : 'text-lg'}`}>{i + 1}</span>}
                             </div>
                         ))}
                     </div>
@@ -4337,7 +4428,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                     </div>
                     {/* Right: count + retake */}
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                        <div id="photo-counter" className={`text-white/70 font-mono ${isVertical ? 'text-xs' : 'text-sm'}`}>{capturedPhotos.length}/{selectedLayoutId ? getEffectiveLayoutConfig(selectedFrame, selectedLayoutId).slots.length : 0}</div>
+                        <div id="photo-counter" className={`text-white/70 font-mono ${isVertical ? 'text-xs' : 'text-sm'}`}>{capturedPhotos.length}/{candidateCount}</div>
                     </div>
                 </div>
             </div>
@@ -4354,8 +4445,39 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                     atas lebih (pt-5) dan tinggi preview disetel di bawah wadah
                     (34vh) supaya utuh dan sedikit tersibak ke bawah. */}
                 <div className={`flex flex-col items-center justify-center overflow-hidden relative ${isVertical ? 'h-[40%] shrink-0 px-2 pb-2 pt-5' : 'flex-1 p-12'}`}>
-                    <div className="w-full h-full flex items-center justify-center drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
-                        <PreviewComponent maxHeightStr={isVertical ? '34vh' : '75vh'} />
+                    <div className="w-full min-h-0 flex-1 flex flex-col items-center justify-center gap-2">
+                        {selectedPackage === 'print' && selectedPrintPhotoIndex !== null && capturedPhotos[selectedPrintPhotoIndex] && (
+                            <p id="print-monochrome-print-notice" className="max-w-3xl shrink-0 text-center text-xs font-semibold leading-snug text-[#f6cd46]">
+                                Pratinjau hitam-putih ini menunjukkan foto akan dicetak dalam hitam-putih; tekstur hasil di kertas dapat berbeda.
+                            </p>
+                        )}
+                        <div className={`w-full min-h-0 flex-1 ${isVertical ? 'h-full' : 'h-[calc(100%-4rem)]'} flex flex-row items-center justify-center gap-3`}>
+                        <div className={`h-full min-w-0 flex items-center justify-center drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)] ${selectedPackage === 'print' ? 'w-1/2' : 'w-full'}`}>
+                            <PreviewComponent maxHeightStr={isVertical ? '34vh' : '75vh'} />
+                        </div>
+                        {selectedPackage === 'print' && selectedPrintPhotoIndex !== null && capturedPhotos[selectedPrintPhotoIndex] && (
+                            <div id="print-monochrome-preview-panel" className="h-full min-w-0 w-1/2 flex flex-col items-center justify-center gap-2 px-1">
+                                <p className="text-center text-xs font-bold text-[#f6cd46]">Pratinjau hasil cetak — hitam-putih</p>
+                                <div className="w-full min-h-0 flex-1 flex items-center justify-center drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)]">
+                                    <PreviewComponent
+                                        id="print-monochrome-preview"
+                                        monochromePhotoUrl={monochromePreviewUrl}
+                                        shadow={false}
+                                        maxHeightStr={isVertical ? '34vh' : '75vh'}
+                                    />
+                                </div>
+                                <NiimbotPhotoPreview
+                                    alt="Monochrome photo renderer"
+                                    source={capturedPhotos[selectedPrintPhotoIndex]}
+                                    slot={getSelectedPrintPreviewSlot()}
+                                    settings={getNiimbotPrintSettings()}
+                                    matchPhotoCrop
+                                    onPrepared={setMonochromePreviewUrl}
+                                    renderOnly
+                                />
+                            </div>
+                        )}
+                        </div>
                     </div>
                     {!isVertical && (
                       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-max flex items-center justify-center gap-12 opacity-100 pointer-events-none">
@@ -4391,7 +4513,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                 {(!selectedLayoutId || frames.filter(f => f.id === selectedLayoutId).flatMap(f => f.styles).length === 0) && (
                                     <p className="col-span-4 text-white/40 italic p-4 text-center text-sm">No frames available for this layout.</p>
                                 )}
-                                {frames.filter(f => f.id === selectedLayoutId).flatMap(f => f.styles).map(style => {
+                                {frames.filter(f => f.id === selectedLayoutId).flatMap(f => f.styles).filter(style => getEffectiveLayoutConfig(style, selectedLayoutId).slots.length === outputCount).map(style => {
                                     const cfg = getEffectiveLayoutConfig(style, selectedLayoutId);
                                     return (
                                         <button 
@@ -4421,7 +4543,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                         onClick={() => setSelectedFilter(f)} 
                                         className={`group relative aspect-video rounded-lg overflow-hidden transition-all transform active:scale-95 ${selectedFilter?.id === f.id ? 'ring-2 ring-[#f6cd46] ring-offset-2 ring-offset-[#0c1633] scale-[0.98]' : 'hover:scale-[1.02] opacity-80 hover:opacity-100 ring-1 ring-white/10'}`}
                                     >
-                                        <img src={capturedPhotos[0]} className="w-full h-full object-cover" style={{ filter: f.cssFilter }} />
+                                        <img src={selectedOutputPhotos[0]} className="w-full h-full object-cover" style={{ filter: f.cssFilter }} />
                                         {selectedFilter?.id === f.id && (
                                             <div className="absolute top-1 right-1 bg-[#f6cd46] text-black p-0.5 rounded-full shadow-lg">
                                                 <Check size={10} strokeWidth={4} />
@@ -4442,7 +4564,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                             onClick={handleFinish} 
                             className={`w-full bg-white hover:bg-gray-100 text-[#0c1633] rounded-xl font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg ${isVertical ? 'py-8 text-2xl' : 'py-6 text-2xl'}`}
                         >
-                            CETAK & SELESAI
+                            {selectedPackage === 'print' ? 'CETAK & SELESAI' : 'SIMPAN DIGITAL & SELESAI'}
                         </button>
                     </div>
                 </div>
@@ -4451,35 +4573,40 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PRINT_SELECTION' && (
-        <BoothWrapper title="Pilih foto yang ingin dicetak" subtitle="Pilih satu foto untuk dicetak. Foto digital tetap berupa grid lengkap." hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper title={selectedPackage === 'print' ? 'Pilih Foto untuk Print' : 'Pilih Foto Digital'} subtitle={`Pilih ${outputCount} dari ${candidateCount} foto. Ketuk foto lain untuk mengganti pilihan terakhir. Retake tersedia sebelum konfirmasi.`} hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
           <div className="h-full flex flex-col bg-[#0a1128] text-white p-6 gap-6">
-            <p className="text-center text-lg">Hanya 1 foto yang dicetak, tanpa artwork frame. Semua foto tetap tersedia secara digital.</p>
-            <div role="radiogroup" aria-label="Foto yang ingin dicetak" className="flex-1 min-h-0 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-4 content-start">
+            <p id="selected-photo-counter" className="text-center text-lg">{selectedPhotoIndices.length}/{outputCount} foto dipilih · {selectedPackage === 'print' ? '1 strip cetak + salinan digital; label tanpa artwork frame' : `${outputCount} strip digital, tanpa cetak fisik`}</p>
+            <div role="group" aria-label="Pilihan hasil foto" className="flex-1 min-h-0 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-4 content-start">
               {capturedPhotos.map((photo, index) => (
-                <button key={index} id={`btn-select-print-photo-${index}`} role="radio"
-                  aria-checked={selectedPrintPhotoIndex === index} aria-label={`Foto ${index + 1}`}
-                  disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                  onClick={() => { if (!printSelectionConfirmed && !printActionInFlightRef.current) setSelectedPrintPhotoIndex(index); }}
-                  className={`rounded-xl overflow-hidden border-4 bg-[#1b2b5a] disabled:opacity-50 ${selectedPrintPhotoIndex === index ? 'border-[#f6cd46]' : 'border-transparent'}`}>
-                  <img src={photo} alt={`Foto ${index + 1}`} className="w-full aspect-video object-contain" />
-                  <span className="block py-3 font-bold">Foto {index + 1}{selectedPrintPhotoIndex === index ? ' ✓ Dipilih' : ''}</span>
-                </button>
+                <div key={index} className="flex flex-col gap-2">
+                  <button id={`btn-select-print-photo-${index}`} role="checkbox"
+                    aria-checked={selectedPhotoIndices.includes(index)} aria-label={`Foto ${index + 1}`}
+                    disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
+                    onClick={() => handlePhotoSelection(index)}
+                    className={`rounded-xl overflow-hidden border-4 bg-[#1b2b5a] disabled:opacity-50 ${selectedPhotoIndices.includes(index) ? 'border-[#f6cd46]' : 'border-transparent'}`}>
+                    {renderCandidatePreview(index)}
+                    <span className="block py-3 font-bold">Foto {index + 1}{selectedPhotoIndices.includes(index) ? ` ✓ Pilihan ${selectedPhotoIndices.indexOf(index) + 1}` : ''}</span>
+                  </button>
+                  <button id={`btn-retake-candidate-${index}`} onClick={() => handleRetakePhoto(index)}
+                    disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current || captureExpired || (captureDeadline !== null && Date.now() >= captureDeadline)}
+                    className="rounded-xl bg-white/10 px-4 py-3 font-bold disabled:opacity-40">Retake Foto {index + 1}</button>
+                </div>
               ))}
             </div>
             <div className="flex gap-4 justify-center shrink-0">
-              <button onClick={() => { setSelectedPrintPhotoIndex(null); setPrintSelectionConfirmed(false); setStep('EDIT'); }}
+              <button id="btn-retake-batch" onClick={handleRetake}
                 disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                className="px-6 py-4 rounded-xl bg-white/10">Kembali</button>
+                className="px-6 py-4 rounded-xl bg-white/10">Ulang Semua Foto</button>
               <button id="btn-confirm-print-photo" onClick={handleConfirmPrintSelection}
-                disabled={selectedPrintPhotoIndex === null || printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                className="px-8 py-4 rounded-xl bg-[#f6cd46] text-black font-bold disabled:opacity-40">Konfirmasi foto ini</button>
+                disabled={selectedPhotoIndices.length !== outputCount || capturedPhotos.length !== candidateCount || printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
+                className="px-8 py-4 rounded-xl bg-[#f6cd46] text-black font-bold disabled:opacity-40">Konfirmasi {outputCount} Foto</button>
             </div>
           </div>
         </BoothWrapper>
       )}
 
       {step === 'RESULT' && (
-        <BoothWrapper title="Your Photos" subtitle="Ready to share!" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper title={selectedPackage === 'print' ? 'Hasil Digital + Print' : 'Hasil Digital'} subtitle={selectedPackage === 'print' ? '1 foto pilihan untuk 1 strip cetak dan salinan digital.' : 'Foto pilihan Anda siap diunduh.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
             {/* VERTICAL: stack QR top + preview bottom. HORIZONTAL: panel left + preview right */}
             <div className={`h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
                  {/* QR / info panel – left in horizontal, top in vertical */}
@@ -4489,7 +4616,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                      : 'w-full lg:w-[450px] xl:w-[500px] h-full border-r flex-col items-center justify-center p-8 lg:p-12 overflow-y-auto custom-scrollbar'
                  }`} style={isVertical ? { height: '36%' } : {}}>
                      {/* QR Code block */}
-                     <div className={`bg-[#1b2b5a] rounded-3xl flex flex-col items-center justify-center border-4 transition-colors shrink-0 ${
+                     {selectedPackage && (
+                     <div id="digital-download-panel" className={`bg-[#1b2b5a] rounded-3xl flex flex-col items-center justify-center border-4 transition-colors shrink-0 ${
                        downloadUrl ? 'border-green-400' : 'border-dashed border-white/20'
                      } ${isVertical ? 'h-full aspect-square p-1.5' : 'w-full max-w-[360px] p-8 mb-6 shadow-[0_10px_40px_rgba(0,0,0,0.5)]'}`}>
                          {downloadUrl ? (
@@ -4544,12 +4672,13 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                              </div>
                          )}
                      </div>
+                     )}
                      {/* Info + Buttons — right column in vertical, below QR in horizontal */}
                      <div className={`flex flex-col ${isVertical ? 'flex-1 justify-center gap-1.5 min-w-0' : 'w-full max-w-[360px] mt-2 gap-3'}`}>
                          {!isVertical && (
                            <>
                              <h2 className="text-2xl font-black text-center">Thank you!</h2>
-                             <p className="text-white/60 text-center text-xs mb-2">Scan QR to download your photo</p>
+                             <p className="text-white/60 text-center text-xs mb-2">{selectedPackage === 'print' ? 'Scan QR untuk salinan digital; foto pilihan juga tersedia untuk dicetak.' : 'Scan QR untuk mengunduh foto pilihan.'}</p>
                            </>
                          )}
                          {isVertical && downloadUrl && (
@@ -4560,7 +4689,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                              ⚠ Jangan tutup halaman ini sebelum QR berhasil discan!
                            </p>
                          )}
-                         {tombol.retake && (
+                         {tombol.retake && uploadStatus !== 'uploading' && !isPrintActive && printState !== 'success' && btPrintState !== 'done' && (
                          <button onClick={handleRetake} className={`w-full px-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 border border-white/20 active:scale-95 ${isVertical ? 'py-2 text-xs' : 'py-3'}`}>
                              <RefreshCw size={14} /> New Photo
                          </button>

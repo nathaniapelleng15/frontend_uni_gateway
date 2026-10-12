@@ -827,6 +827,7 @@ export class NiimbotPrinter {
     source: string,
     size: LabelSize,
     adj: PrintAdjustments = DEFAULT_ADJUSTMENTS,
+    mode: 'monochrome' | 'color' = 'monochrome',
   ): Promise<HTMLCanvasElement> {
     // Diperiksa dengan pesan yang menyebut sebabnya.
     //
@@ -885,36 +886,28 @@ export class NiimbotPrinter {
     ctx.drawImage(img, r.dx, r.dy, r.dw, r.dh);
     ctx.restore();
 
-    // WAJIB, dan dilakukan setelah filter: encoder NiimBlueLib mencetak setiap
-    // piksel yang bukan putih murni sebagai tinta penuh
-    // (`color !== 0xffffff` di image_encoder.js). Foto tidak punya piksel yang
-    // persis putih, jadi tanpa langkah ini SELURUH label keluar hitam pekat.
-    // Library tidak menyediakan dithering maupun ambang, jadi dihitung di sini.
+    // Hanya jalur cetak/dithering yang wajib mengubah piksel menjadi 1-bit.
+    // Mode color dipakai khusus preview kandidat Print agar tetap berwarna,
+    // tanpa mengubah crop, skala, margin, offset, atau ruang kertas Niimbot.
     //
     // Diletakkan setelah filter supaya pengaturan terang/kontras dari Admin ikut
     // menentukan hasil hitam-putihnya — kalau sebelum, filter akan mengembalikan
     // nilai antara dan merusak hasil dithering.
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    // Bidang cetak yang sama dengan yang dipakai menggambar: dithering di luar
-    // kotak hanya membuang waktu, dan menjaga perhitungan tinta tetap setara
-    // dengan yang benar-benar keluar di kertas.
-    const inkBox = printBox(canvas.width, canvas.height,
-      adj.marginTopPx, adj.marginRightPx, adj.marginLeftPx, adj.marginBottomPx, B1_PRO_PRINTHEAD_PX,
-      adj.offsetXPx, adj.offsetYPx);
-    // Algoritma abu-abu dan penajaman dari Admin. Keduanya dikenakan SEBELUM
-    // dither — setelah dither pikselnya hanya 0/255, jadi penajaman tidak lagi
-    // mungkin dan pilihan algoritma tidak berpengaruh.
-    //
-    // Skala: UI memakai 0..100, penajaman memakai 0..2 (2 = kuat). Dibagi 50,
-    // bukan 100, supaya 100 di UI benar-benar menghasilkan penajaman kuat —
-    // diukur: amount 2 menaikkan detail tersisa ~16% (garis halus) sampai ~39%
-    // (kontras lebih tinggi), sedangkan amount 1 hanya ~8%.
-    ditherToBlackAndWhite(
-      imageData.data, canvas.width, canvas.height, ONE_BIT_THRESHOLD, inkBox,
-      adj.grayscale || DEFAULT_GRAYSCALE_ALGORITHM,
-      Math.max(0, Math.min(100, Number(adj.sharpen) || 0)) / 50,
-    );
-    ctx.putImageData(imageData, 0, 0);
+    if (mode === 'monochrome') {
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Bidang cetak yang sama dengan yang dipakai menggambar: dithering di luar
+      // kotak hanya membuang waktu, dan menjaga perhitungan tinta tetap setara
+      // dengan yang benar-benar keluar di kertas.
+      const inkBox = printBox(canvas.width, canvas.height,
+        adj.marginTopPx, adj.marginRightPx, adj.marginLeftPx, adj.marginBottomPx, B1_PRO_PRINTHEAD_PX,
+        adj.offsetXPx, adj.offsetYPx);
+      ditherToBlackAndWhite(
+        imageData.data, canvas.width, canvas.height, ONE_BIT_THRESHOLD, inkBox,
+        adj.grayscale || DEFAULT_GRAYSCALE_ALGORITHM,
+        Math.max(0, Math.min(100, Number(adj.sharpen) || 0)) / 50,
+      );
+      ctx.putImageData(imageData, 0, 0);
+    }
 
     return canvas;
   }

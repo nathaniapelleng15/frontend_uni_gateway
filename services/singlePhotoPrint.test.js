@@ -17,7 +17,7 @@ function handler(name, scope, text = source) {
   }
   visit(ast);
   assert.ok(initializer, `${name} must exist`);
-  const js = ts.transpileModule(`const fn = ${initializer.getText(ast)}; fn;`, {
+  const js = ts.transpileModule(`(${initializer.getText(ast)});`, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None }
   }).outputText;
   return vm.runInNewContext(js, scope);
@@ -25,67 +25,67 @@ function handler(name, scope, text = source) {
 function finishScope(selectedPackage, capturedPhotos) {
   const state = {};
   return { state, selectedPackage, capturedPhotos, window: { innerWidth: 1000 },
+    step: 'EDIT', outputCount: 1, candidateCount: 2, selectedOutputPhotos: [],
+    selectedPhotoIndices: [], printSelectionConfirmed: false,
+    setSelectedOutputPhotos: v => { state.output = v; },
     setStep: v => { state.step = v; },
     setSelectedPrintPhotoIndex: v => { state.index = v; },
     setPrintSelectionConfirmed: v => { state.confirmed = v; },
     setIsResultPanelCollapsed: () => {} };
 }
-test('print grid requires explicit selection before entering result', () => {
+test('Print cannot enter Result without confirmed selected output', () => {
   const scope = finishScope('print', ['one', 'two']);
   handler('handleFinish', scope)();
-  assert.equal(scope.state.step, 'PRINT_SELECTION');
-  assert.equal(scope.state.index, null);
-  assert.equal(scope.state.confirmed, false);
+  assert.equal(scope.state.step, undefined);
+  scope.printSelectionConfirmed = true; scope.selectedOutputPhotos = ['two'];
+  handler('handleFinish', scope)();
+  assert.equal(scope.state.step, 'RESULT');
 });
 
-test('digital skips print selection; one-photo print is automatically selected', () => {
+test('Digital also requires explicit selection rather than skipping review', () => {
   const digital = finishScope('digital', ['one', 'two']);
   handler('handleFinish', digital)();
+  assert.equal(digital.state.step, undefined);
+  digital.printSelectionConfirmed = true; digital.selectedOutputPhotos = ['two'];
+  handler('handleFinish', digital)();
   assert.equal(digital.state.step, 'RESULT');
-  assert.equal(digital.state.index, null);
-  const single = finishScope('print', ['one']);
-  handler('handleFinish', single)();
-  assert.equal(single.state.step, 'RESULT');
-  assert.equal(single.state.index, 0);
-  assert.equal(single.state.confirmed, true);
 });
 
-test('confirmation refuses invalid selection and freezes a valid choice', () => {
+test('confirmation refuses invalid selection and freezes a valid choice before Edit', () => {
   for (const index of [null, -1, 2, 0.5, NaN, 1]) {
     const scope = { ...finishScope('print', ['one', 'two']), step: 'PRINT_SELECTION',
-      selectedPrintPhotoIndex: index, printActionInFlightRef: { current: false },
+      selectedPhotoIndices: [index], printActionInFlightRef: { current: false },
       isPrintActive: false, btPrintState: 'idle' };
     handler('handleConfirmPrintSelection', scope)();
-    assert.equal(scope.state.step, index === 1 ? 'RESULT' : undefined);
+    assert.equal(scope.state.step, index === 1 ? 'EDIT' : undefined);
     assert.equal(scope.state.confirmed, index === 1 ? true : undefined);
   }
   const busy = { ...finishScope('print', ['one', 'two']), step: 'PRINT_SELECTION',
-    selectedPrintPhotoIndex: 1, printActionInFlightRef: { current: true },
+    selectedPhotoIndices: [1], printActionInFlightRef: { current: true },
     isPrintActive: false, btPrintState: 'idle' };
   handler('handleConfirmPrintSelection', busy)();
   assert.equal(busy.state.step, undefined);
 });
 
-test('selection page exposes exactly one choice and explicit confirmation in Indonesian', () => {
+test('selection page exposes selectable results and explicit confirmation in Indonesian', () => {
   assert.match(source, /step === 'PRINT_SELECTION'/);
-  assert.match(source, /Pilih foto yang ingin dicetak/);
-  assert.match(source, /role="radiogroup"/);
-  assert.match(source, /role="radio"/);
-  assert.match(source, /aria-checked=\{selectedPrintPhotoIndex === index\}/);
+  assert.match(source, /Pilih Foto untuk Print/);
+  assert.match(source, /role="group"/);
+  assert.match(source, /role="checkbox"/);
+  assert.match(source, /aria-checked=\{selectedPhotoIndices.includes\(index\)\}/);
   assert.match(source, /onClick=\{handleConfirmPrintSelection\}/);
 });
-
 function printScope(overrides = {}) {
   return { selectedPackage: 'print', step: 'RESULT', capturedPhotos: ['one', 'two'],
     selectedPrintPhotoIndex: 1, printSelectionConfirmed: true, btPrintState: 'idle',
-    processedFrame: { id: 'frame' }, selectedFrame: null, selectedLayoutId: '2x1',
+    processedFrame: { id: 'frame' }, selectedFrame: null, selectedLayoutId: '1x1',
     ...overrides };
 }
 test('print image uses the confirmed selected photo and matching slot, never a digital fallback', async () => {
   const calls = [];
   const scope = printScope({ generatePrintImage: async (...args) => { calls.push(args); return 'selected-crop'; } });
   assert.equal(await handler('prepareSelectedPrintImage', scope)(), 'selected-crop');
-  assert.deepEqual(calls, [['two', scope.processedFrame, '2x1', 1]]);
+  assert.deepEqual(calls, [['two', scope.processedFrame, '1x1', 0]]);
   for (const invalid of [{selectedPrintPhotoIndex: null}, {selectedPrintPhotoIndex: -1},
     {selectedPrintPhotoIndex: 2}, {selectedPrintPhotoIndex: 0.5},
     {printSelectionConfirmed: false}, {selectedPackage: 'digital'}, {step: 'PRINT_SELECTION'},
@@ -120,6 +120,7 @@ test('Bluetooth prints only the prepared selected crop with exactly one copy', a
     DEFAULT_ADJUSTMENTS: {}, photoAdjust: { fitMode: 'cover' }, thermalDensity: 3,
     thermalOffsetYPx: 0, thermalOffsetXPx: 0, isGrayscaleAlgorithm: () => false,
     DEFAULT_GRAYSCALE_ALGORITHM: 'rec601' };
+  scope.getNiimbotPrintSettings=handler('getNiimbotPrintSettings',scope);
   await handler('printViaBluetoothCore', scope)();
   assert.equal(prints.length, 1);
   assert.equal(prints[0][0], 'selected-crop');
@@ -172,7 +173,7 @@ test('server print uploads a separate single asset, preserves digital URL and qu
   assert.equal(scope.queued.length, 1);
   assert.equal(scope.queued[0][1].image_url, 'https://cdn/SESSION_print.png');
   assert.equal(scope.queued[0][1].copies, 1);
-  assert.equal(scope.queued[0][1].orientation, 'landscape');
+  assert.equal(scope.queued[0][1].orientation, 'portrait');
 });
 test('successful direct auto print never enqueues another physical server print', async () => {
   const scope = autoScope();

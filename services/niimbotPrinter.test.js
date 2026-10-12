@@ -15,6 +15,7 @@ import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SERVICE = readFileSync(path.join(here, '..', 'services', 'niimbotPrinter.ts'), 'utf8');
+const PHOTO_PREVIEW = readFileSync(path.join(here, '..', 'services', 'niimbotPhotoPreview.ts'), 'utf8');
 // Konstanta geometri dipisah ke labelGeometry.ts supaya bisa benar-benar
 // dieksekusi di test tanpa dependensi library printer.
 const GEOMETRY = readFileSync(path.join(here, '..', 'services', 'labelGeometry.ts'), 'utf8');
@@ -261,6 +262,19 @@ test('jeda paket TIDAK dinolkan', () => {
   const kode = SERVICE.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/setPacketInterval/.test(kode),
     'jangan menyentuh jeda paket: biarkan bawaan library');
+});
+
+test('customize grayscale photo stays smooth while physical printing keeps one-bit dithering', () => {
+  assert.match(SERVICE, /mode: 'monochrome' \| 'color' = 'monochrome'/,
+    'physical print must remain monochrome by default');
+  assert.match(SERVICE, /if \(mode === 'monochrome'\) \{[\s\S]*?ditherToBlackAndWhite\([\s\S]*?ctx\.putImageData\(imageData, 0, 0\);[\s\S]*?\n    \}/,
+    'only monochrome/thermal output may dither its pixels');
+  assert.match(PHOTO_PREVIEW, /grayscaleContext\.filter = 'grayscale\(100%\)'/,
+    'the display-only photo is converted to continuous grayscale');
+  assert.match(PHOTO_PREVIEW, /prepareCanvas\(grayscale\.toDataURL\('image\/png'\), previewSize, previewAdjustments, 'color'\)/,
+    'the display-only renderer bypasses thermal dithering after making the photo grayscale');
+  assert.match(PHOTO_PREVIEW, /if \(!matchPhotoCrop\) \{[\s\S]*?prepareCanvas\(crop\.toDataURL\('image\/png'\), settings\.size, settings\.adjustments, mode\)/,
+    'the ordinary Niimbot preview and physical print path retain their existing renderer');
 });
 
 test('kanvas memberi tahu browser bahwa pikselnya akan dibaca', () => {

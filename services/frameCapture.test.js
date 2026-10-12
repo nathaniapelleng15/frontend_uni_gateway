@@ -50,9 +50,20 @@ test('hasil jepretan disimpan tanpa mirror dan memakai seluruh frame kamera', ()
   assert.ok(source.includes("photoCanvas.toDataURL('image/jpeg', 0.95)"));
 });
 
-test('preview pemotretan tidak memotong area kamera dengan object-cover', () => {
-  assert.match(source, /id="camera-preview"[^>]*object-contain/);
-  assert.doesNotMatch(source, /id="camera-preview"[^>]*object-cover/);
+test('preview pemotretan Print memakai kanvas kamera langsung yang sama dengan Digital', () => {
+  assert.match(source, /renderCameraLivePreview = \(\) => <canvas id="camera-preview" ref=\{processingCanvasRef\}/);
+  assert.match(source, /w-full h-full object-contain transform scale-x-\[-1\]/);
+  assert.ok(!source.includes('NiimbotPhotoPreview id="camera-preview"'), 'stream langsung tidak boleh diproses ulang menjadi preview Niimbot');
+});
+
+test('Print and Digital share the capture preview frame and live guide', () => {
+  assert.ok(source.includes('{renderCameraLivePreview()}'), 'both packages use one common live preview node');
+  assert.ok(!source.includes('selectedPackage === \'print\' ? <div className="absolute inset-0 flex items-center justify-center p-4">'),
+    'Print must not add a private padding/centering wrapper');
+  assert.ok(source.includes('{step === \'CAPTURE\' && selectedLayoutId && (() => {'),
+    'capture framing guide is shared, not package-specific');
+  assert.ok(!source.includes('selectedPackage === \'digital\' && step === \'CAPTURE\' && selectedLayoutId'),
+    'Print must get the same live frame guide as Digital');
 });
 
 test('bingkai panduan di layar tetap ada sebagai petunjuk visual', () => {
