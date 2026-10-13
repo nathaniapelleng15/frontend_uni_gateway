@@ -130,25 +130,14 @@ export function labelMmFromPaperSize(paperSize: string | null | undefined): { wi
  * boleh diisi tinta. Kalau foto diisi ke seluruh kertas, gambar menimpa bingkai
  * dan nomor frame — hasilnya terlihat "tidak sesuai" walau printernya benar.
  *
- * Angka di bawah = kotak putih label yang dipakai, dalam piksel pada 300 dpi:
- *
- *   kiri 0 px (0,00 mm) | kanan 83 px (7,03 mm)   -> 54 - 0 - 7,03 = 46,97 mm
- *   atas 70 px (5,93 mm) | bawah 154 px (13,04 mm) -> 67 - 5,93 - 13,04 = 48,03 mm
- *   kotak 555 x 567 px = 46,99 x 48,01 mm, di x=0 y=70
- *   jumlah: 0 + 555 + 83 = 638 px (54 mm), 70 + 567 + 154 = 791 px (67 mm)
- *
- * Riwayat penyesuaian di kertas: 46x46 -> 47x47 -> 47x48 (ukuran), lalu blok
- * kotak digeser TURUN supaya tepi ATAS foto tidak keluar dari bingkai
- * (atas 35 -> 70 px; bawah mengikuti agar tinggi kotak tetap 567).
- * Kotaknya TIDAK persegi (47:48) — itu permintaan eksplisit. Mode cover menjaga
- * foto tidak di-stretch: kelebihannya dipotong.
- *
- * Diukur dari kertas, bukan dari tabel model. Kanvas 638 x 791 TIDAK dipangkas:
- * yang membatasi tinta adalah kotak ini (tepi kanan 555 masih di bawah kepala
- * cetak 576, jadi tidak ada yang hilang diam-diam).
- *
- * Kalau masih bergeser, yang dikoreksi adalah offset X/Y di Pengaturan Printer —
- * BUKAN angka di sini, supaya ukuran kotaknya tetap 555 x 567 px.
+ * Target ukuran foto sesuai kertas: persegi 555 x 555 px (46,99 mm), 1:1.
+ * Posisi x=0 y=35, margin kiri/atas/kanan/bawah 0/35/83/201 px.
+ * Kanvas 638 x 791 px pada 300 dpi tidak dipangkas atau diskalakan:
+ *   0 + 555 + 83 = 638; 35 + 555 + 201 = 791.
+ * Tepi kanan kotak 555 masih di bawah kepala cetak 576.
+ * Mode cover mempertahankan rasio foto sumber; kelebihannya dipotong.
+ * Ukuran/posisi fisik tetap memerlukan verifikasi pada kertas.
+ * Offset X/Y di Pengaturan Printer menggeser kotak tanpa meresize.
  *
  * `fitMode: 'cover'` bukan pilihan gaya: bingkai yang sudah tercetak menuntut
  * kotaknya TERISI PENUH. Mode 'fit' menyisakan jalur putih di dalam bingkai saat
@@ -161,7 +150,7 @@ export const LABEL_FRAME_BOX_PX: Record<string, {
   bottomPx: number;
   fitMode: 'cover' | 'fit' | 'stretch';
 }> = {
-  'nimbotpaper-polaroid': { topPx: 70, rightPx: 83, leftPx: 0, bottomPx: 154, fitMode: 'cover' },
+  'nimbotpaper-polaroid': { topPx: 35, rightPx: 83, leftPx: 0, bottomPx: 201, fitMode: 'cover' },
 };
 
 /**

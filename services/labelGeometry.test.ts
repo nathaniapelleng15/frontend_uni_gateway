@@ -220,20 +220,18 @@ test('ukuran slot dibulatkan ke piksel utuh', () => {
 // tengahnya boleh diisi. Angkanya sama dengan POL di atas — keduanya membaca
 // preset produksi, jadi tidak ada salinan angka yang bisa menyimpang.
 //
-// Kenapa kotak 47 x 48 mm di X 0 / Y 6 mm: ukuran lebar sudah pas; Y diturunkan
-// sampai 6 mm supaya tepi ATAS foto berhenti di garis putih bingkai (tidak
-// melewatinya). Tidak persegi (47:48) — permintaan eksplisit.
+// Target persegi 47 x 47 mm di X 0 / Y 35 px, sesuai permintaan kertas.
 const POLAROID = POL;
 
-test('preset label mengisi kotak 555 x 567 px (46,99 x 48,01 mm) di X 0 / Y 70 px', () => {
+test('preset label mengisi kotak 555 x 555 px (46,99 mm) di X 0 / Y 35 px', () => {
   // B1_PRO_PRINTHEAD_PX WAJIB ikut: jalur produksi (prepareCanvas) selalu
   // meneruskan batas kepala cetak, dan tanpa argumen itu printBox memakai lebar
   // kanvas sebagai batas — test jadi menguji konfigurasi yang tidak pernah dipakai.
   const b = printBox(POLAROID.W, POLAROID.H, POLAROID.top, POLAROID.right, POLAROID.left, POLAROID.bottom, B1_PRO_PRINTHEAD_PX);
   assert.strictEqual(b.x, 0, 'kiri 0 px: foto menempel tepi kiri kanvas');
-  assert.strictEqual(b.y, 70, 'atas 70 px (5,93 mm)');
+  assert.strictEqual(b.y, 35, 'atas 35 px');
   assert.strictEqual(b.w, 555, 'lebar kotak 46,99 mm');
-  assert.strictEqual(b.h, 567, 'tinggi kotak 48,01 mm');
+  assert.strictEqual(b.h, 555, 'tinggi kotak 46,99 mm');
   assert.strictEqual(mmToPx(47), 555, '47 mm = 555 px pada 300 dpi');
   assert.strictEqual(mmToPx(48), 567, '48 mm = 567 px pada 300 dpi');
   // Batas kepala cetak: kolom 576 ke atas TIDAK keluar, dan itu tidak berpesan
@@ -255,10 +253,10 @@ test('printBox menempatkan area cetak sesuai margin empat sisi', () => {
   // kanvas sebagai batas — test jadi menguji konfigurasi yang tidak pernah dipakai.
   const b = printBox(POLAROID.W, POLAROID.H, POLAROID.top, POLAROID.right, POLAROID.left, POLAROID.bottom, B1_PRO_PRINTHEAD_PX);
   assert.strictEqual(b.x, 0, 'kiri 0 px (menempel tepi kanvas)');
-  assert.strictEqual(b.y, 70, 'atas 70 px (5,93 mm)');
-  // Area = 638 - 0 - 83 = 555 px (46,99 mm), dan 791 - 70 - 154 = 567 px (48,01 mm).
+  assert.strictEqual(b.y, 35, 'atas 35 px');
+  // Area = 638 - 0 - 83 = 555 px (46,99 mm), dan 791 - 35 - 201 = 555 px (46,99 mm).
   assert.strictEqual(b.w, 555, 'lebar area 46,99 mm');
-  assert.strictEqual(b.h, 567, 'tinggi area 48,01 mm');
+  assert.strictEqual(b.h, 555, 'tinggi area 46,99 mm');
 });
 
 test('kotak cetak tidak pernah negatif walau margin melebihi kanvas', () => {
@@ -324,9 +322,9 @@ test('foto tidak pernah keluar dari kotak walau offset besar', () => {
     assert.ok(r.dy <= r.clipY + 1, `x=${ox} y=${oy}: tepi atas foto tidak keluar kotak`);
     assert.ok(r.dx + r.dw >= r.clipX + r.clipW - 1, `x=${ox} y=${oy}: sisi kanan kotak terisi`);
     assert.ok(r.dy + r.dh >= r.clipY + r.clipH - 1, `x=${ox} y=${oy}: sisi bawah kotak terisi`);
-    // Ukuran kotak selalu sama: 47 x 48 mm.
+    // Ukuran kotak selalu sama: 47 x 47 mm.
     assert.strictEqual(r.clipW, 555, `x=${ox} y=${oy}: lebar area cetak tetap 47 mm`);
-    assert.strictEqual(r.clipH, 567, `x=${ox} y=${oy}: tinggi area cetak tetap 48 mm`);
+    assert.strictEqual(r.clipH, 555, `x=${ox} y=${oy}: tinggi area cetak tetap 47 mm`);
   }
 });
 

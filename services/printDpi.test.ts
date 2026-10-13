@@ -85,7 +85,7 @@ test('preset label Polaroid memakai angka px yang sama dengan 300 dpi', () => {
   const f = labelFrameBox('nimbotpaper-polaroid')!;
   assert.deepEqual(
     { topPx: f.topPx, rightPx: f.rightPx, leftPx: f.leftPx, bottomPx: f.bottomPx },
-    { topPx: mmToPx(70 / (300 / 25.4)), rightPx: mmToPx(83 / (300 / 25.4)), leftPx: 0, bottomPx: mmToPx(154 / (300 / 25.4)) },
+    { topPx: mmToPx(35 / (300 / 25.4)), rightPx: mmToPx(83 / (300 / 25.4)), leftPx: 0, bottomPx: mmToPx(201 / (300 / 25.4)) },
     'margin preset harus tepat pada 300 dpi',
   );
   assert.strictEqual(f.fitMode, 'cover');
