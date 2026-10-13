@@ -311,6 +311,19 @@ export const startSession = async (
   };
 };
 
+export const verifySandboxDuitkuPayment = async (
+  sessionCode: string
+): Promise<{ payment_status: 'pending' | 'verified' | 'expired' }> => {
+  const response = await request<ApiResponse<{ payment_status: 'pending' | 'verified' | 'expired' }>>({
+    method: 'POST',
+    url: `/sessions/${encodeURIComponent(sessionCode)}/payment-verification/check`,
+  });
+  if (!response.data.success || !response.data.data) {
+    throw new KioskApiError(response.data.message || 'Verifikasi pembayaran Sandbox gagal.', response.status);
+  }
+  return response.data.data;
+};
+
 export const getSessionPaymentStatus = async (sessionCode: string): Promise<SessionPaymentStatus> => {
   const response = await request<ApiResponse<SessionPaymentStatus>>({
     method: 'GET',

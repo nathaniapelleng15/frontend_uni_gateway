@@ -6,6 +6,7 @@ const preparedPhotos = new Map<string, Promise<string>>();
 
 interface Props {
   id?: string;
+  frameRevision?: string | number;
   alt: string;
   source?: string;
   liveSource?: React.RefObject<HTMLCanvasElement | null>;
@@ -20,11 +21,12 @@ interface Props {
   renderOnly?: boolean;
 }
 
-export default function NiimbotPhotoPreview({id, alt, source, liveSource, active=true, slot, settings, maxHeight, color=false, frameAspectRatio, matchPhotoCrop=false, onPrepared, renderOnly=false}: Props) {
+export default function NiimbotPhotoPreview({id, alt, source, liveSource, active=true, slot, settings, maxHeight, color=false, frameAspectRatio, matchPhotoCrop=false, onPrepared, renderOnly=false, frameRevision}: Props) {
   const [prepared, setPrepared] = useState<{key:string;url:string} | null>(null);
   const [error, setError] = useState<string | null>(null);
   const settingsKey = JSON.stringify({slot,settings,mode:color?'color':'monochrome',matchPhotoCrop});
-  const key = `${settingsKey}:${source || 'live'}`;
+  const cacheKey = `${settingsKey}:${source || 'live'}`;
+  const key = `${cacheKey}:${frameRevision ?? ''}`;
   useEffect(() => {
     let cancelled=false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -37,13 +39,13 @@ export default function NiimbotPhotoPreview({id, alt, source, liveSource, active
           timer=setTimeout(render,100);return;
         }
         const raw = source || snapshotNiimbotCamera(camera!);
-        let job = source ? preparedPhotos.get(key) : undefined;
+        let job = source ? preparedPhotos.get(cacheKey) : undefined;
         if (!job) {
           job=prepareNiimbotPhotoPreview(raw,slot,settings,color?'color':'monochrome',matchPhotoCrop).then(canvas=>canvas.toDataURL('image/png'));
           if (source) {
             if (preparedPhotos.size>=20) preparedPhotos.delete(preparedPhotos.keys().next().value!);
-            preparedPhotos.set(key,job);
-            job.catch(()=>preparedPhotos.delete(key));
+            preparedPhotos.set(cacheKey,job);
+            job.catch(()=>preparedPhotos.delete(cacheKey));
           }
         }
         const url=await job;
@@ -59,7 +61,7 @@ export default function NiimbotPhotoPreview({id, alt, source, liveSource, active
     };
     void render();
     return () => { cancelled=true;if(timer) clearTimeout(timer); };
-  },[key,liveSource,active,onPrepared]);
+  },[key,cacheKey,liveSource,active,onPrepared]);
   if (renderOnly) return null;
   const paperRatio=settings.size.widthPx/settings.size.heightPx;
   const displayRatio=frameAspectRatio && Number.isFinite(frameAspectRatio) && frameAspectRatio>0 ? frameAspectRatio : paperRatio;

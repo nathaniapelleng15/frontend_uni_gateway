@@ -28,8 +28,9 @@ export interface FrameGradientStop {
 }
 
 export interface FrameBackground {
-  type: 'transparent' | 'solid' | 'gradient';
-  color?: string; // For solid
+  type: 'transparent' | 'solid' | 'gradient' | 'image';
+  color?: string; // For solid or image fallback
+  imageUrl?: string; // Full-canvas artwork uploaded/set as a background in Admin
   gradientType?: 'linear' | 'radial';
   gradientAngle?: number; // 0-360
   gradientStops?: FrameGradientStop[];

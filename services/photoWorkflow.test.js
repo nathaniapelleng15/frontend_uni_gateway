@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 const source = fs.readFileSync(new URL('../components/PhotoBooth.tsx', import.meta.url), 'utf8');
+const apiSource = fs.readFileSync(new URL('./apiService.ts', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('PhotoBooth.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 function initializer(name) {
   let found;
@@ -274,6 +275,12 @@ test('Print Customize keeps the color composite and adds a separate monochrome l
   assert.match(source, /Pratinjau hitam-putih ini menunjukkan foto akan dicetak dalam hitam-putih; tekstur hasil di kertas dapat berbeda/,
     'the visible notice explains that the grayscale preview represents the print result and paper texture may differ');
 });
+test('changing frame reruns the monochrome renderer even when slot geometry stays the same', () => {
+  const rendererAttrs=source.match(/<NiimbotPhotoPreview(?=[^>]*alt="Monochrome photo renderer")([^>]*)\/>/s)?.[1] || '';
+  assert.match(rendererAttrs, /frameRevision=\{selectedFrame\?\.id/,
+    'frame identity must rerun the monochrome render even when a different frame has identical slot geometry');
+});
+
 test('camera live preview uses the exact same direct canvas for Print and Digital', () => {
   const scope={selectedPackage:'digital',processingCanvasRef:{},reviewPhotoIndex:null,capturedPhotos:['live'],retakeIndex:null,getReviewPhotoSlot:()=>({}),getNiimbotPrintSettings:()=>({}),React:{createElement:(type,props)=>({type,props})},NiimbotPhotoPreview:'Niimbot'};
   const fn=vm.runInNewContext(ts.transpileModule(`(${initializer('renderCameraLivePreview').getText(ast)});`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText,scope);
@@ -329,4 +336,28 @@ test('each of 2/4/6 captures pauses for review and only Continue advances to the
     assert.equal(scope.state.setReviewPhotoIndex,1,'replacement also requires review');
     scope.reviewPhotoIndex=1;accept();assert.equal(scope.state.setStep,'PRINT_SELECTION');
   }
+});
+
+test('frame decorations stay behind photo slots so changing a frame cannot cover the selected photo', () => {
+  const slots = source.slice(source.indexOf('{config.slots.map((slot, i) => {'), source.indexOf('{frameToRender?.elements?.map(el => {'));
+  const decorations = source.slice(source.indexOf('{frameToRender?.elements?.map(el => {'), source.indexOf('                </div>\n            </div>\n        </div>', source.indexOf('{frameToRender?.elements?.map(el => {')));
+  assert.match(slots, /zIndex:\s*1/);
+  assert.match(decorations, /zIndex:\s*0/);
+  const composite = source.slice(source.indexOf('const generateCompositeImage = async'));
+  const frameLayerIndex = composite.indexOf('// Frame decorations render below photo slots');
+  assert.ok(frameLayerIndex >= 0 && frameLayerIndex < composite.indexOf('// 3 — Photos'), 'exported frame elements must render before photos');
+});
+
+
+test('Sandbox payment screen exposes a manual provider verification action only in the sandbox order panel', async () => {
+  assert.match(source, /paymentEnvironment === 'sandbox' && merchantOrderId/);
+  assert.match(source, /onClick=\{handleSandboxVerifyPayment\}/);
+  assert.match(source, /Verifikasi Pembayaran/);
+  assert.match(apiSource, /url: `\/sessions\/\$\{encodeURIComponent\(sessionCode\)\}\/payment-verification\/check`/);
+  const scope = stateScope({paymentMethod:'duitku_qris',paymentEnvironment:'sandbox',sessionCode:'sandbox-1',sandboxVerificationLoading:false,
+    verifySandboxDuitkuPayment:async()=>({payment_status:'verified'}),KioskApiError:class extends Error{}});
+  await handler('handleSandboxVerifyPayment',scope)();
+  assert.equal(scope.state.setStep,'CAPTURE');
+  assert.equal(scope.state.setVerificationStatus,'verified');
+  assert.equal(scope.state.setSandboxVerificationLoading,false);
 });

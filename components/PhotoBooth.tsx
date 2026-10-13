@@ -5,6 +5,7 @@ import {
   Lock, Unlock, Scan, X, ChevronUp, ChevronDown, Loader2, Wand2, LayoutTemplate, AlertCircle, AlertTriangle
 } from 'lucide-react';
 import { FrameLayout, FrameStyle, PhotoFilter, GridLayoutId, VirtualBackground, FrameElement, STORAGE_KEYS } from '../types';
+import { frameCacheStorageKey, isSelectedFrameAvailable, resolveFrameArtworkUrl, shouldRefreshFrameCatalog, staleFrameSyncWarning } from '../services/frameAssets';
 import { getStoredFilters, getLayoutConfig, getStoredBackgrounds, getAppConfig } from '../services/storageService';
 import { useAirGesture } from './useAirGesture';
 import { kioskAgentBridge } from '../services/kioskAgentBridge';
@@ -25,7 +26,7 @@ import {
   verifyPayment, fetchTemplates, queuePrintJob, getPrintJobStatus, KioskApiError,
   getApiConfig, isAutoPrintEnabled, isManualPrintFallbackEnabled,
   submitPaymentEvidence, getPaymentVerificationStatus, fetchPrintingConfig,
-  getSessionPaymentStatus, simpanKonfigurasiServer, sumberKonfigurasi, fetchPackageVisibility,
+  getSessionPaymentStatus, verifySandboxDuitkuPayment, simpanKonfigurasiServer, sumberKonfigurasi, fetchPackageVisibility,
   fetchPhotoboothControlVisibility
 } from '../services/apiService';
 
@@ -315,15 +316,22 @@ const normalizeTemplatePrices = (templates: any[]): FrameLayout[] => templates.m
         const canonical = styleConfig && typeof styleConfig === 'object' && !Array.isArray(styleConfig)
           ? styleConfig
           : null;
+        const normalizedBackground = canonical ? normalizeFrameBackground(style, canonical) : null;
+        const artworkUrl = canonical
+          ? resolveFrameArtworkUrl(style, canonical, getApiConfig().baseUrl)
+          : undefined;
         return canonical
           ? {
               ...style,
               _layoutConfig: canonical,
-              backgroundConfig: normalizeFrameBackground(style, canonical),
+              backgroundConfig: normalizedBackground?.type === 'image'
+                ? { ...normalizedBackground, imageUrl: artworkUrl ?? normalizedBackground.imageUrl }
+                : normalizedBackground,
               elements: normalizeFrameElements(style, canonical),
-              // Admin may overwrite an existing uploaded file at the same URL.
-              // Bust the browser cache so the kiosk displays the new artwork.
-              overlayUrl: bustFrameAssetCache(style.overlayUrl ?? style.overlay_url ?? canonical.overlayUrl ?? canonical.overlay_url),
+              // Admin's "Set BG" may store artwork in overlayUrl, backgroundConfig,
+              // or a legacy snake_case field. Normalize all of them to one URL
+              // used by the thumbnail, live preview, and composite renderer.
+              overlayUrl: bustFrameAssetCache(artworkUrl),
               slotBorder: style.slotBorder ?? style.slot_border ?? canonical.slotBorder ?? canonical.slot_border,
               slotBorderColor: style.slotBorderColor ?? style.slot_border_color ?? canonical.slotBorderColor ?? canonical.slot_border_color,
               slotBorderWidth: style.slotBorderWidth ?? style.slot_border_width ?? canonical.slotBorderWidth ?? canonical.slot_border_width
@@ -349,7 +357,8 @@ const normalizeTemplatePrices = (templates: any[]): FrameLayout[] => templates.m
  */
 export const bacaTemplatesTersimpan = (): FrameLayout[] => {
   try {
-    const mentah = localStorage.getItem(STORAGE_KEYS.FRAMES);
+    const { baseUrl, kioskId } = getApiConfig();
+    const mentah = localStorage.getItem(frameCacheStorageKey(baseUrl, kioskId));
     if (!mentah) return [];
     const data = JSON.parse(mentah);
     return Array.isArray(data) ? (data as FrameLayout[]) : [];
@@ -1399,6 +1408,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [paymentEnvironment, setPaymentEnvironment] = useState<string>('');
   const [merchantOrderId, setMerchantOrderId] = useState<string>('');
   const [sandboxCopyMessage, setSandboxCopyMessage] = useState<string>('');
+  const [sandboxVerificationMessage, setSandboxVerificationMessage] = useState<string>('');
+  const [sandboxVerificationLoading, setSandboxVerificationLoading] = useState(false);
   const sandboxOrderInputRef = useRef<HTMLInputElement>(null);
   const [finalUploadedUrl, setFinalUploadedUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
@@ -1510,7 +1521,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         const freshFrames = normalizeTemplatePrices(templates);
         if (freshFrames.length > 0) {
           try {
-            localStorage.setItem(STORAGE_KEYS.FRAMES, JSON.stringify(freshFrames));
+            localStorage.setItem(frameCacheStorageKey(getApiConfig().baseUrl, getApiConfig().kioskId), JSON.stringify(freshFrames));
           } catch (e) {
             // Penyimpanan penuh / diblokir: daftar di memori tetap dipakai,
             // hanya salinan untuk keadaan darurat yang tidak tersedia.
@@ -1545,7 +1556,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         const salinan = bacaTemplatesTersimpan();
         if (salinan.length > 0) {
           setFrames(salinan);
-          setTemplateError(null);
+          setTemplateError(staleFrameSyncWarning());
           console.warn('[PhotoBooth] Template dari backend gagal; memakai salinan terakhir:', message);
           return true;
         }
@@ -1699,11 +1710,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     };
   }, [step, idlePaused, isCalibrating, goToSignage]);
 
-  // Admin updates can happen while the kiosk page stays open. Refresh when
-  // the kiosk is idle; never replace frame data during an active photo flow.
+  // Admin can update frame art while the kiosk stays open. Refresh on the
+  // landing and frame selection screens, but not during capture/payment/print.
   useEffect(() => {
     const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible' && step === 'LANDING') refreshFrames();
+      if (shouldRefreshFrameCatalog(step, document.visibilityState)) void refreshFrames();
     };
     document.addEventListener('visibilitychange', refreshWhenVisible);
     window.addEventListener('focus', refreshWhenVisible);
@@ -1724,13 +1735,21 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     const availableStyles = frames.filter(f => f.id === selectedLayoutId).flatMap(f => f.styles);
     if (availableStyles.length === 0) return;
 
-    const currentStyle = selectedFrame ? availableStyles.find(style => style.id === selectedFrame.id) : null;
-    if (!currentStyle || currentStyle !== selectedFrame) {
-        setSelectedFrame(currentStyle || availableStyles[0]);
+    const currentStyle = selectedFrame
+      ? availableStyles.find(style => String(style.id) === String(selectedFrame.id))
+      : null;
+    if (!isSelectedFrameAvailable(availableStyles, selectedFrame)) {
+        setSelectedFrame(availableStyles[0]);
+        setProcessedFrame(null);
+        setAreAssetsReady(false);
+    } else if (step === 'EDIT' && currentStyle && currentStyle !== selectedFrame) {
+        // Before capture, update the active preview to the Admin's latest
+        // version too. Once capture starts, do not swap a pending print frame.
+        setSelectedFrame(currentStyle);
         setProcessedFrame(null);
         setAreAssetsReady(false);
     }
-  }, [selectedLayoutId, frames, selectedFrame]);
+  }, [selectedLayoutId, frames, selectedFrame, step]);
 
   // --- OPTIMIZATION: Process Frame Assets to Base64 ---
   useEffect(() => {
@@ -2177,6 +2196,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setPaymentEnvironment('');
       setMerchantOrderId('');
       setSandboxCopyMessage('');
+      setSandboxVerificationMessage('');
+      setSandboxVerificationLoading(false);
       setPaymentPollingState('idle');
       setVerificationStatus('');
       setVerificationReasonCodes([]);
@@ -2246,6 +2267,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setPaymentEnvironment(sessionData.payment_environment || '');
       setMerchantOrderId(sessionData.merchant_order_id || '');
       setSandboxCopyMessage('');
+      setSandboxVerificationMessage('');
+      setSandboxVerificationLoading(false);
       setPaymentPollingState(['gopay_merchant_polling', 'duitku_qris'].includes(sessionData.payment_method || '') ? 'checking' : 'idle');
       setChallengeId(sessionData.challenge_id || '');
       // Pembayaran bisa dimatikan dari sisi server (payment_profiles.payment_required
@@ -2284,6 +2307,35 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       sandboxOrderInputRef.current?.focus();
       sandboxOrderInputRef.current?.select();
       setSandboxCopyMessage('Salin Order ID dari kolom di atas, lalu paste di simulator.');
+    }
+  };
+
+  const handleSandboxVerifyPayment = async () => {
+    if (paymentMethod !== 'duitku_qris' || paymentEnvironment !== 'sandbox' || !sessionCode
+      || sandboxVerificationLoading) return;
+    setSandboxVerificationLoading(true);
+    setSandboxVerificationMessage('Menghubungi Duitku untuk memeriksa status transaksi…');
+    try {
+      const result = await verifySandboxDuitkuPayment(sessionCode);
+      if (result.payment_status === 'verified') {
+        setSandboxVerificationMessage('Pembayaran terverifikasi.');
+        setPaymentPollingState('idle');
+        setFlowError(null);
+        setVerificationStatus('verified');
+        setStep('CAPTURE');
+      } else if (result.payment_status === 'expired') {
+        setSandboxVerificationMessage('Transaksi Sandbox sudah kedaluwarsa. Silakan mulai sesi baru.');
+        setPaymentPollingState('expired');
+      } else {
+        setSandboxVerificationMessage('Pembayaran belum terdeteksi oleh Duitku. Tunggu sebentar, lalu verifikasi lagi.');
+        setPaymentPollingState('waiting');
+      }
+    } catch (error) {
+      setSandboxVerificationMessage(error instanceof KioskApiError
+        ? error.message
+        : 'Verifikasi pembayaran Sandbox gagal. Silakan coba lagi.');
+    } finally {
+      setSandboxVerificationLoading(false);
     }
   };
 
@@ -3067,6 +3119,39 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         }
       }
 
+      // Frame decorations render below photo slots so an opaque sticker/text
+      // cannot cover the selected photo when the visitor changes templates.
+      for (const el of (frameToUse?.elements ?? [])) {
+        ctx.save();
+        ctx.globalAlpha = el.opacity ?? 1;
+        ctx.translate((el.x / 100) * canvas.width, (el.y / 100) * canvas.height);
+        ctx.rotate(((el.rotation ?? 0) * Math.PI) / 180);
+        if (el.type === 'text') {
+          const fs = el.fontSize ?? 40;
+          ctx.font = `${el.fontStyle ?? 'normal'} ${el.fontWeight ?? 'normal'} ${fs}px ${el.fontFamily ?? 'sans-serif'}`;
+          ctx.fillStyle = el.color ?? '#000';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          if (el.effect === 'shadow') { ctx.shadowColor='rgba(0,0,0,.5)'; ctx.shadowBlur=6; ctx.shadowOffsetX=2; ctx.shadowOffsetY=2; }
+          else if (el.effect === 'neon') { ctx.shadowColor=el.color??'#fff'; ctx.shadowBlur=20; }
+          if (el.effect === 'outline') { ctx.strokeStyle='#000'; ctx.lineWidth=3; ctx.strokeText(el.content,0,0); }
+          ctx.fillText(el.content, 0, 0);
+        } else if (el.type === 'sticker') {
+          try {
+            const img = await loadImg(el.content);
+            const w = ((el.width ?? 10) / 100) * canvas.width;
+            const h = el.height && el.height > 0
+              ? (el.height / 100) * canvas.height
+              : w * (img.naturalHeight / Math.max(1, img.naturalWidth));
+            const offsetX = el.anchor === 'top-left' ? 0 : -w / 2;
+            const offsetY = el.anchor === 'top-left' ? 0 : -h / 2;
+            ctx.drawImage(img, offsetX, offsetY, w, h);
+          } catch { /* skip */ }
+        }
+        ctx.restore();
+      }
+
+      // Photos are always the foreground content in their slots.
       // 3 — Photos, positioned using the Admin slot coordinates.
       for (let i = 0; i < config.slots.length; i++) {
         const slot = config.slots[i];
@@ -3110,38 +3195,6 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       }
       ctx.restore();
 
-      // 4 — Frame elements such as Hello/text/stickers remain above photos.
-      for (const el of (frameToUse?.elements ?? [])) {
-        ctx.save();
-        ctx.globalAlpha = el.opacity ?? 1;
-        ctx.translate((el.x / 100) * canvas.width, (el.y / 100) * canvas.height);
-        ctx.rotate(((el.rotation ?? 0) * Math.PI) / 180);
-        if (el.type === 'text') {
-          const fs = el.fontSize ?? 40;
-          ctx.font = `${el.fontStyle ?? 'normal'} ${el.fontWeight ?? 'normal'} ${fs}px ${el.fontFamily ?? 'sans-serif'}`;
-          ctx.fillStyle = el.color ?? '#000';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          if (el.effect === 'shadow') { ctx.shadowColor='rgba(0,0,0,.5)'; ctx.shadowBlur=6; ctx.shadowOffsetX=2; ctx.shadowOffsetY=2; }
-          else if (el.effect === 'neon') { ctx.shadowColor=el.color??'#fff'; ctx.shadowBlur=20; }
-          if (el.effect === 'outline') { ctx.strokeStyle='#000'; ctx.lineWidth=3; ctx.strokeText(el.content,0,0); }
-          ctx.fillText(el.content, 0, 0);
-        } else if (el.type === 'sticker') {
-          try {
-            const img = await loadImg(el.content);
-            const w = ((el.width ?? 10) / 100) * canvas.width;
-            // Preserve the Admin asset box. Older elements have no height;
-            // for those, derive height from the image's natural aspect ratio.
-            const h = el.height && el.height > 0
-              ? (el.height / 100) * canvas.height
-              : w * (img.naturalHeight / Math.max(1, img.naturalWidth));
-            const offsetX = el.anchor === 'top-left' ? 0 : -w / 2;
-            const offsetY = el.anchor === 'top-left' ? 0 : -h / 2;
-            ctx.drawImage(img, offsetX, offsetY, w, h);
-          } catch { /* skip */ }
-        }
-        ctx.restore();
-      }
 
       return canvas.toDataURL('image/png');
     } catch (err) {
@@ -3731,7 +3784,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                         return (
                             <div key={el.id} style={{
                                     position: 'absolute', left: `${el.x}%`, top: `${el.y}%`, transform: `${el.anchor === 'top-left' ? '' : 'translate(-50%, -50%) '}rotate(${el.rotation || 0}deg)`,
-                                    zIndex: (el.zIndex ?? 0) + 10, opacity: el.opacity ?? 1, color: el.color || '#000', fontFamily: el.fontFamily,
+                                    zIndex: 0, opacity: el.opacity ?? 1, color: el.color || '#000', fontFamily: el.fontFamily,
                                     fontSize: `${Math.max(1, fontSize)}px`, 
                                     fontWeight: el.fontWeight, fontStyle: el.fontStyle, textDecoration: el.textDecoration,
                                     textShadow: el.effect === 'shadow' ? '1px 1px 2px rgba(0,0,0,0.5)' : el.effect === 'neon' ? `0 0 5px ${el.color}, 0 0 10px ${el.color}` : 'none',
@@ -4065,6 +4118,19 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                         </button>
                                         <p aria-live="polite" className="mt-2 text-xs text-white/75">
                                           {sandboxCopyMessage || 'Pilih metode QRIS yang sesuai di simulator, lalu paste Order ID.'}
+                                        </p>
+                                        <button
+                                          type="button"
+                                          onClick={handleSandboxVerifyPayment}
+                                          disabled={sandboxVerificationLoading}
+                                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-wait disabled:opacity-60"
+                                        >
+                                          {sandboxVerificationLoading
+                                            ? <><Loader2 size={16} className="animate-spin" /> Memeriksa pembayaran…</>
+                                            : <><RefreshCw size={16} /> Verifikasi Pembayaran</>}
+                                        </button>
+                                        <p aria-live="polite" className="mt-2 min-h-4 text-xs text-white/75">
+                                          {sandboxVerificationMessage}
                                         </p>
                                       </div>
                                     )}
@@ -4467,6 +4533,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                     />
                                 </div>
                                 <NiimbotPhotoPreview
+                                    frameRevision={selectedFrame?.id ?? ''}
                                     alt="Monochrome photo renderer"
                                     source={capturedPhotos[selectedPrintPhotoIndex]}
                                     slot={getSelectedPrintPreviewSlot()}
