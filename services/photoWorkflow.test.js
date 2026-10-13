@@ -212,7 +212,7 @@ test('Niimbot paper geometry and adjustments remain available to physical Print 
     photoAdjust:{fitMode:'fit'},thermalDensity:3,thermalOffsetYPx:0,thermalOffsetXPx:0,isGrayscaleAlgorithm:()=>false,DEFAULT_GRAYSCALE_ALGORITHM:'rec601'};
   const resolve=handler('getNiimbotPrintSettings',scope);const settings=resolve();
   assert.equal(settings.size.widthPx,638);assert.equal(settings.size.heightPx,791);
-  assert.equal(settings.adjustments.marginTopPx,35);assert.equal(settings.adjustments.marginBottomPx,201);
+  assert.equal(settings.adjustments.marginTopPx,71);assert.equal(settings.adjustments.marginBottomPx,165);
   assert.equal(settings.adjustments.fitMode,'cover');
   scope.printMarginTopPx=100;scope.printMarginBottomPx=124;scope.photoAdjust.fitMode='stretch';
   assert.equal(resolve().adjustments.marginTopPx,100);assert.equal(resolve().adjustments.fitMode,'stretch');
