@@ -271,8 +271,10 @@ test('customize grayscale photo stays smooth while physical printing keeps one-b
     'only monochrome/thermal output may dither its pixels');
   assert.match(PHOTO_PREVIEW, /grayscaleContext\.filter = 'grayscale\(100%\)'/,
     'the display-only photo is converted to continuous grayscale');
-  assert.match(PHOTO_PREVIEW, /prepareCanvas\(grayscale\.toDataURL\('image\/png'\), previewSize, previewAdjustments, 'color'\)/,
-    'the display-only renderer bypasses thermal dithering after making the photo grayscale');
+  assert.match(PHOTO_PREVIEW, /grayscaleContext\.drawImage\(crop, 0, 0\);[\s\S]*?return grayscale;/,
+    'the display-only renderer keeps exactly the same photo pixels without thermal overscan or dithering');
+  assert.equal((PHOTO_PREVIEW.match(/\.prepareCanvas\(/g) || []).length, 1,
+    'only the ordinary physical preview may call the printer renderer');
   assert.match(PHOTO_PREVIEW, /if \(!matchPhotoCrop\) \{[\s\S]*?prepareCanvas\(crop\.toDataURL\('image\/png'\), settings\.size, settings\.adjustments, mode\)/,
     'the ordinary Niimbot preview and physical print path retain their existing renderer');
 });

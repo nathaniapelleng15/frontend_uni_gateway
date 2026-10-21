@@ -79,13 +79,16 @@ function printScope(overrides = {}) {
   return { selectedPackage: 'print', step: 'RESULT', capturedPhotos: ['one', 'two'],
     selectedPrintPhotoIndex: 1, printSelectionConfirmed: true, btPrintState: 'idle',
     processedFrame: { id: 'frame' }, selectedFrame: null, selectedLayoutId: '1x1',
+    assertPrintPhotoGeometryCurrent: () => {},
     ...overrides };
 }
 test('print image uses the confirmed selected photo and matching slot, never a digital fallback', async () => {
   const calls = [];
-  const scope = printScope({ generatePrintImage: async (...args) => { calls.push(args); return 'selected-crop'; } });
+  const presentation = {width:638,height:791,slots:[{x:0,y:71,width:555,height:555}]};
+  const scope = printScope({ getCaptureLayoutConfig: () => presentation,
+    generatePrintImage: async (...args) => { calls.push(args); return 'selected-crop'; } });
   assert.equal(await handler('prepareSelectedPrintImage', scope)(), 'selected-crop');
-  assert.deepEqual(calls, [['two', scope.processedFrame, '1x1', 0]]);
+  assert.deepEqual(calls, [['two', scope.processedFrame, '1x1', 0, presentation]]);
   for (const invalid of [{selectedPrintPhotoIndex: null}, {selectedPrintPhotoIndex: -1},
     {selectedPrintPhotoIndex: 2}, {selectedPrintPhotoIndex: 0.5},
     {printSelectionConfirmed: false}, {selectedPackage: 'digital'}, {step: 'PRINT_SELECTION'},

@@ -1,6 +1,5 @@
 import { NiimbotPrinter, type PrintAdjustments, type LabelSize } from './niimbotPrinter.ts';
 import { paintPrintImage, type PrintSlot } from './printImage.ts';
-import { B1_PRO_PRINTHEAD_PX } from './labelGeometry.ts';
 
 export interface NiimbotPreviewSettings {
   size: LabelSize;
@@ -42,29 +41,10 @@ export async function prepareNiimbotPhotoPreview(
   grayscaleContext.filter = 'grayscale(100%)';
   grayscaleContext.drawImage(crop, 0, 0);
 
-  // Presentation-only path: match the exact selected photo slot, not the
-  // physical label box. Keep pixel density bounded by the B1 Pro print head,
-  // but preserve the slot's aspect ratio and remove paper margins/offsets.
-  const scale = Math.min(1, B1_PRO_PRINTHEAD_PX / slot.width);
-  const widthPx = Math.max(1, Math.round(slot.width * scale));
-  const heightPx = Math.max(1, Math.round(slot.height * scale));
-  const previewSize: LabelSize = {
-    widthPx,
-    heightPx,
-    requestedWidthPx: slot.width,
-    clamped: scale < 1,
-  };
-  const previewAdjustments: PrintAdjustments = {
-    ...settings.adjustments,
-    fitMode: 'cover',
-    marginTopPx: 0,
-    marginRightPx: 0,
-    marginLeftPx: 0,
-    marginBottomPx: 0,
-    offsetXPx: 0,
-    offsetYPx: 0,
-  };
-  return new NiimbotPrinter().prepareCanvas(grayscale.toDataURL('image/png'), previewSize, previewAdjustments, 'color');
+  // Exact display crop: the printer renderer deliberately overscans its ink
+  // rectangle and therefore must not run again for a photo-slot preview.
+  // This canvas is display-only; physical rendering above is unchanged.
+  return grayscale;
 }
 
 /** Match takePhoto's orientation and JPEG serialization without changing the

@@ -11,6 +11,8 @@ import { useAirGesture } from './useAirGesture';
 import { kioskAgentBridge } from '../services/kioskAgentBridge';
 import { NiimbotPrinter, PRINTER_BELUM_DIPASANGKAN, labelSize as computeLabelSize, labelMmFromPaperSize, labelFrameBox, firstSlot, DEFAULT_ADJUSTMENTS, type PrintAdjustments } from '../services/niimbotPrinter';
 import NiimbotPhotoPreview from './NiimbotPhotoPreview';
+import PrintCameraPreview from './PrintCameraPreview';
+import { resolvePackagePhotoLayout, paintPrintCameraCrop, preparedPhotoForKey, assertPrintPhotoGeometryMatches, type PhotoLayout } from '../services/printPhotoGeometry';
 import { paintCover as paintCoverInto, paintPrintImage } from '../services/printImage';
 import { DEFAULT_GRAYSCALE_ALGORITHM, isGrayscaleAlgorithm } from '../services/oneBitImage';
 import { SIGNAGE_URL, IDLE_REDIRECT_MS, shouldArmIdleTimer, isKioskEmbedded, kembaliKeSignage, resolveSignageBaseUrl, postExitRequest } from '../services/idleReturn';
@@ -719,10 +721,13 @@ const generatePrintImage = async (
     frame: FrameStyle | null | undefined,
     layoutId: GridLayoutId | null | undefined,
     photoIndex: number,
+    captureConfig?: PhotoLayout,
 ): Promise<string | null> => {
     if (!photo) return null;
     try {
-        const config = getEffectiveLayoutConfig(frame, layoutId);
+        // Physical single-photo preparation bypasses the Admin portrait slot.
+        // This avoids a portrait-then-square double crop of Print captures.
+        const config = captureConfig || getEffectiveLayoutConfig(frame, layoutId);
         const slot = Number.isInteger(photoIndex) && photoIndex >= 0 ? config.slots[photoIndex] : null;
         if (!slot) return null;
 
@@ -866,7 +871,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [selectedPhotoIndices, setSelectedPhotoIndices] = useState<number[]>([]);
   const [selectedOutputPhotos, setSelectedOutputPhotos] = useState<string[]>([]);
   const [selectedPrintPhotoIndex, setSelectedPrintPhotoIndex] = useState<number | null>(null);
-  const [monochromePreviewUrl, setMonochromePreviewUrl] = useState<string | null>(null);
+  const [monochromePrepared, setMonochromePrepared] = useState<{key: string; url: string} | null>(null);
   const [printSelectionConfirmed, setPrintSelectionConfirmed] = useState(false);
 
   const [selectedFilter, setSelectedFilter] = useState<PhotoFilter | null>(null);
@@ -947,6 +952,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     return bawaan;
   };
   const [kioskPaperSize, setKioskPaperSize] = useState('4R');
+  const [hasPrintGeometrySettings, setHasPrintGeometrySettings] = useState(false);
 
   /**
    * Cetak LANGSUNG ke printer label lewat Web Bluetooth — tanpa kiosk-agent.
@@ -1044,14 +1050,45 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       return {size, adjustments};
   };
 
+  // Freeze capture/physical photo geometry only. Admin frame compositions must
+  // always retain their own getEffectiveLayoutConfig dimensions and slots.
+  const printPhotoLayoutRef = useRef<PhotoLayout | null>(null);
+  const getLivePrintLayoutConfig = (frame: FrameStyle | null | undefined, layoutId: string | null | undefined) =>
+    resolvePackagePhotoLayout('print', getEffectiveLayoutConfig(frame, layoutId),
+      hasPrintGeometrySettings ? getNiimbotPrintSettings() : undefined);
+  const getCaptureLayoutConfig = (frame: FrameStyle | null | undefined, layoutId: string | null | undefined) =>
+    selectedPackage === 'print'
+      ? (printPhotoLayoutRef.current || getLivePrintLayoutConfig(frame, layoutId))
+      : getEffectiveLayoutConfig(frame, layoutId);
+  const assertPrintPhotoGeometryCurrent = () => {
+    if (!hasPrintGeometrySettings) throw new Error('Konfigurasi ukuran Niimbot belum tersedia. Sinkronkan kiosk sebelum mencetak.');
+    const captured = printPhotoLayoutRef.current;
+    if (!captured) throw new Error('Ambil foto Print terlebih dahulu.');
+    assertPrintPhotoGeometryMatches(captured, getLivePrintLayoutConfig(processedFrame || selectedFrame, selectedLayoutId));
+  };
+  const printPresentationConfig = getCaptureLayoutConfig(processedFrame || selectedFrame, selectedLayoutId);
+  const printPresentationKey = JSON.stringify(printPresentationConfig);
+  const monochromePreviewKey = JSON.stringify({
+    source: selectedPrintPhotoIndex === null ? null : capturedPhotos[selectedPrintPhotoIndex],
+    geometry: getEffectiveLayoutConfig(processedFrame || selectedFrame, selectedLayoutId), settings: getNiimbotPrintSettings(),
+    frame: selectedFrame?.id, processedFrame: processedFrame?.id,
+  });
+  const monochromePreviewUrl = preparedPhotoForKey(monochromePrepared, monochromePreviewKey);
+  const setMonochromePreviewUrl = useCallback((url: string | null) => {
+    setMonochromePrepared(url ? {key: monochromePreviewKey, url} : null);
+  }, [monochromePreviewKey]);
+  useEffect(() => { setMonochromePreviewUrl(null); }, [printPresentationKey]);
+
   const prepareSelectedPrintImage = async (): Promise<string> => {
     if (selectedPackage !== 'print' || step !== 'RESULT' || !printSelectionConfirmed
       || selectedPrintPhotoIndex === null || !Number.isInteger(selectedPrintPhotoIndex)
       || selectedPrintPhotoIndex < 0 || !capturedPhotos[selectedPrintPhotoIndex]) {
       throw new Error('Pilih dan konfirmasi satu foto yang ingin dicetak.');
     }
+    assertPrintPhotoGeometryCurrent();
     const image = await generatePrintImage(capturedPhotos[selectedPrintPhotoIndex],
-      processedFrame || selectedFrame, selectedLayoutId, 0);
+      processedFrame || selectedFrame, selectedLayoutId, 0,
+      getCaptureLayoutConfig(processedFrame || selectedFrame, selectedLayoutId));
     if (!image) throw new Error('Gambar cetak gagal disiapkan. Silakan coba lagi.');
     return image;
   };
@@ -1196,6 +1233,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
           }
           if (agentState.paperSize) {
               setKioskPaperSize(agentState.paperSize);
+              setHasPrintGeometrySettings(true);
           }
           const dens = num(agentState.thermalDensity);
           if (dens !== null) setThermalDensity(dens);
@@ -1236,6 +1274,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       // gagal (jaringan belum siap), supaya kiosk tidak pernah kembali ke
       // bawaan yang tidak pernah disetujui siapa pun.
       simpanKonfigurasiServer(cfg as unknown as Record<string, unknown>);
+      setHasPrintGeometrySettings(true);
       const n = (v: unknown, fallback: number) => {
         const x = Number(v);
         return Number.isFinite(x) ? x : fallback;
@@ -2172,6 +2211,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       // Ensure state is clear when starting fresh
       setSelectedPackage(null);
       setCapturedPhotos([]);
+      printPhotoLayoutRef.current = null;
       setSelectedPrintPhotoIndex(null);
       setPrintSelectionConfirmed(false);
       setBtPrintState('idle');
@@ -2238,7 +2278,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     setSelectedFrame(availableStyles[0] || null);
     setProcessedFrame(null);
     setAreAssetsReady(false);
-    setCapturedPhotos([]); 
+    setCapturedPhotos([]);
+    printPhotoLayoutRef.current = null;
     setIsAutoCapturing(false); 
     setCaptureDeadline(null);
     setRemainingCaptureSeconds(0);
@@ -2863,13 +2904,23 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     // Balik sekali lagi ke canvas baru saat menyimpan foto agar file hasilnya
     // natural (tidak mirror), tanpa mengubah tampilan live.
     const photoCanvas = document.createElement('canvas');
-    photoCanvas.width = canvas.width;
-    photoCanvas.height = canvas.height;
+    if (selectedPackage === 'print' && !printPhotoLayoutRef.current) {
+      printPhotoLayoutRef.current = getCaptureLayoutConfig(selectedFrame, selectedLayoutId);
+    }
+    const printSlot = selectedPackage === 'print'
+      ? getCaptureLayoutConfig(selectedFrame, selectedLayoutId).slots[0] : null;
+    photoCanvas.width = printSlot ? printSlot.width : canvas.width;
+    photoCanvas.height = printSlot ? printSlot.height : canvas.height;
     const photoCtx = photoCanvas.getContext('2d');
     if (!photoCtx) return;
-    photoCtx.translate(photoCanvas.width, 0);
-    photoCtx.scale(-1, 1);
-    photoCtx.drawImage(canvas, 0, 0);
+    if (printSlot) {
+      paintPrintCameraCrop(photoCtx, canvas, printSlot);
+    } else {
+      // Digital intentionally keeps the full processing canvas and orientation.
+      photoCtx.translate(photoCanvas.width, 0);
+      photoCtx.scale(-1, 1);
+      photoCtx.drawImage(canvas, 0, 0);
+    }
     const photo = photoCanvas.toDataURL('image/jpeg', 0.95);
     const capturedIndex = retakeIndex ?? capturedPhotos.length;
     setCapturedPhotos(prev => retakeIndex === null
@@ -2880,7 +2931,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     setRetakeIndex(null);
     setReviewPhotoIndex(capturedIndex);
     setIsAutoCapturing(false);
-  }, [captureDeadline, retakeIndex, capturedPhotos.length, candidateCount, reviewPhotoIndex]);
+  }, [captureDeadline, retakeIndex, capturedPhotos.length, candidateCount, reviewPhotoIndex,
+    selectedPackage, selectedFrame, selectedLayoutId, printPresentationKey]);
 
   // Keep one session clock running while the user is taking or retaking photos.
   useEffect(() => {
@@ -2935,7 +2987,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   const handleRetake = () => {
     if (isPrintActive || printActionInFlightRef.current || printState === 'success' || btPrintState === 'done' || uploadStatus === 'uploading') return;
-    setCapturedPhotos([]); 
+    setCapturedPhotos([]);
+    printPhotoLayoutRef.current = null;
     setIsAutoCapturing(false); 
     setRetakeIndex(null);
     setReviewPhotoIndex(null);
@@ -3614,11 +3667,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   // Each strip has two candidates. Review the corresponding output slot,
   // never use the candidate index as a slot index (candidate 2 is still slot 0).
   const getReviewPhotoSlot = (candidateIndex: number) => {
-    const config = getEffectiveLayoutConfig(selectedFrame, selectedLayoutId);
+    const config = getCaptureLayoutConfig(selectedFrame, selectedLayoutId);
     return config.slots[Math.min(Math.floor(candidateIndex / 2), config.slots.length - 1)];
   };
-  // The mono display crop follows the exact effective frame used by the color
-  // composition and physical photo preparation, not a stale selection snapshot.
+  // Display-only mono uses the original Admin slot, exactly like the color
+  // composition. Physical single-photo preparation uses capture geometry above.
   const getSelectedPrintPreviewSlot = () => getEffectiveLayoutConfig(
     processedFrame || selectedFrame, selectedLayoutId,
   ).slots[0];
@@ -3652,7 +3705,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     );
   };
 
-  const renderCameraLivePreview = () => <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />;
+  const renderCameraLivePreview = () => selectedPackage === 'print' ? <>
+    <canvas ref={processingCanvasRef} className="hidden" aria-hidden="true" />
+    <PrintCameraPreview sourceRef={processingCanvasRef} slot={printPresentationConfig.slots[0]} />
+  </> : <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />;
 
   const renderCandidatePreview = (index: number, review = false) => review
     ? <ReviewPhotoPreview index={index} />
@@ -3763,7 +3819,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                           : selectedOutputPhotos[i];
                         const slotBorder = getSlotBorderConfig(frameToRender);
                         return (
-                            <div key={i} className="absolute overflow-hidden flex items-center justify-center" style={{ left: `${(slot.x / config.width) * 100}%`, top: `${(slot.y / config.height) * 100}%`, width: `${(slot.width / config.width) * 100}%`, height: `${(slot.height / config.height) * 100}%`, zIndex: 1, boxSizing: 'border-box', border: `${Math.max(1, slotBorder.width * scaleFactor)}px solid ${slotBorder.color}`, backgroundColor: photo ? 'transparent' : 'rgba(156, 163, 175, 0.48)' }}>
+                            <div key={i} data-photo-slot={i} data-photo-width={slot.width} data-photo-height={slot.height} className="absolute overflow-hidden flex items-center justify-center" style={{ left: `${(slot.x / config.width) * 100}%`, top: `${(slot.y / config.height) * 100}%`, width: `${(slot.width / config.width) * 100}%`, height: `${(slot.height / config.height) * 100}%`, zIndex: 1, boxSizing: 'border-box', border: `${Math.max(1, slotBorder.width * scaleFactor)}px solid ${slotBorder.color}`, backgroundColor: photo ? 'transparent' : 'rgba(156, 163, 175, 0.48)' }}>
                                 {photo ? (
                                     /* Captured photos are Data URIs, so no CORS is needed. */
                                     <img src={photo} className="w-full h-full object-cover" style={{ filter: i === 0 && monochromePhotoUrl ? 'none' : selectedFilter?.cssFilter || 'none' }} />
@@ -3909,6 +3965,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                   <img src="/assets/LOGO UNI SMILE.png" alt="Uni Smile" className="h-12 md:h-16 rounded-xl object-contain" />
               </div>
             </div>
+            <footer id="photobooth-customer-support" className="absolute bottom-4 left-4 right-4 z-10 text-center text-xs leading-relaxed text-white/70 landscape:right-auto landscape:w-72 landscape:max-w-[calc(100vw_-_2rem)] landscape:text-left">
+              <p>Layanan customer support untuk pertanyaan maupun kendala penggunaan photobooth.</p>
+              <p>WhatsApp: <span className="whitespace-nowrap">087897574789</span> <span aria-hidden="true"> · </span> Email: <span className="whitespace-nowrap">uninsidemed@gmail.com</span></p>
+            </footer>
             <div className="absolute top-8 left-8 flex gap-4 z-50">
                <BackButton id="btn-back-landing" onClick={goToSignage} uiMode={uiMode} />
             </div>
@@ -4371,8 +4431,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
             <div className={`fixed inset-0 bg-white z-[100] pointer-events-none duration-0 ${flash ? 'opacity-100' : 'opacity-0'}`} />
                 <div className="relative flex-1 w-full bg-black overflow-hidden">
                     {renderCameraLivePreview()}
-                    {/* Camera guide overlay shared by Print and Digital on the live preview only. */}
-                    {step === 'CAPTURE' && selectedLayoutId && (() => {
+                    {/* Print guide belongs to its cropped canvas; Digital guide is unchanged. */}
+                    {selectedPackage !== 'print' && step === 'CAPTURE' && selectedLayoutId && (() => {
                         const config = getEffectiveLayoutConfig(processedFrame || selectedFrame, selectedLayoutId);
                         const idx = (retakeIndex ?? capturedPhotos.length) % config.slots.length;
                         const slot = config.slots[idx];
@@ -4465,7 +4525,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                     {/* Thumbnails */}
                     <div className={`flex gap-1.5 overflow-x-auto items-center h-full ${isVertical ? 'py-1.5' : 'py-2 gap-2'}`}>
                         {Array.from({length: candidateCount}).map((_, i) => (
-                            <div key={i} className={`flex-shrink-0 rounded-lg border-2 flex items-center justify-center overflow-hidden bg-white/5 ${capturedPhotos[i] ? 'border-green-400' : 'border-white/20'} ${isVertical ? 'w-10 h-14' : 'w-16 h-24 md:w-24 md:h-32'}`}>
+                            <div data-testid="capture-photo-thumbnail" key={i} style={selectedPackage === 'print' ? {aspectRatio: `${printPresentationConfig.slots[0].width} / ${printPresentationConfig.slots[0].height}`} : undefined} className={`flex-shrink-0 rounded-lg border-2 flex items-center justify-center overflow-hidden bg-white/5 ${capturedPhotos[i] ? 'border-green-400' : 'border-white/20'} ${selectedPackage === 'print' ? (isVertical ? 'w-10' : 'w-16 md:w-24') : (isVertical ? 'w-10 h-14' : 'w-16 h-24 md:w-24 md:h-32')}`}>
                                 {capturedPhotos[i] ? <img src={capturedPhotos[i]} alt={`Foto ${i + 1}`} className="w-full h-full object-cover object-center" /> : <span className={`text-white/30 font-bold ${isVertical ? 'text-sm' : 'text-lg'}`}>{i + 1}</span>}
                             </div>
                         ))}
@@ -4519,7 +4579,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                         )}
                         <div className={`w-full min-h-0 flex-1 ${isVertical ? 'h-full' : 'h-[calc(100%-4rem)]'} flex flex-row items-center justify-center gap-3`}>
                         <div className={`h-full min-w-0 flex items-center justify-center drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)] ${selectedPackage === 'print' ? 'w-1/2' : 'w-full'}`}>
-                            <PreviewComponent maxHeightStr={isVertical ? '34vh' : '75vh'} />
+                            <PreviewComponent id={selectedPackage === 'print' ? 'print-color-preview' : undefined} maxHeightStr={isVertical ? '34vh' : '75vh'} />
                         </div>
                         {selectedPackage === 'print' && selectedPrintPhotoIndex !== null && capturedPhotos[selectedPrintPhotoIndex] && (
                             <div id="print-monochrome-preview-panel" className="h-full min-w-0 w-1/2 flex flex-col items-center justify-center gap-2 px-1">
@@ -4606,7 +4666,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                             <div className={`grid px-1 ${isVertical ? 'grid-cols-4 gap-1.5' : 'grid-cols-2 gap-3'}`}>
                                 {filters.map(f => (
                                     <button 
-                                        key={f.id} 
+                                        data-testid="filter-photo-thumbnail"
+                                        key={f.id}
                                         onClick={() => setSelectedFilter(f)} 
                                         className={`group relative aspect-video rounded-lg overflow-hidden transition-all transform active:scale-95 ${selectedFilter?.id === f.id ? 'ring-2 ring-[#f6cd46] ring-offset-2 ring-offset-[#0c1633] scale-[0.98]' : 'hover:scale-[1.02] opacity-80 hover:opacity-100 ring-1 ring-white/10'}`}
                                     >

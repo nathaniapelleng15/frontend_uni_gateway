@@ -68,8 +68,10 @@ test('composite uses selected outputs while the download gallery receives every 
   const ctx = {fillRect(){},save(){},restore(){},beginPath(){},rect(){},clip(){},strokeRect(){}};
   const scope = stateScope({selectedLayoutId:'1x1', capturedPhotos:['rejected','chosen'], selectedOutputPhotos:['chosen'],
     printSelectionConfirmed:true, outputCount:1, selectedPackage:'print', step:'RESULT', selectedPrintPhotoIndex:1,
+    assertPrintPhotoGeometryCurrent:()=>{},
     processedFrame:null, selectedFrame:null, selectedFilter:null, photoAdjust:{brightness:100,contrast:100,saturation:100},
-    getEffectiveLayoutConfig:()=>({width:100,height:200,slots:[{x:0,y:0,width:100,height:200}]}),
+    getEffectiveLayoutConfig:()=>({width:708,height:1062,slots:[{x:40,y:60,width:628,height:782}]}),
+    getCaptureLayoutConfig:()=>({width:638,height:791,slots:[{x:0,y:71,width:555,height:555}]}),
     getSlotBorderConfig:()=>({color:'white',width:1}), document:{createElement:()=>({getContext:()=>ctx,toDataURL:()=> 'composite'})},
     loadImageElement:async photo=>photo, drawCoverInto:(_ctx,image)=>drawn.push(image), console,
     finalPhotoUploadPromiseRef:{current:null}, sessionCode:'S', KioskApiError:Error,
@@ -82,7 +84,7 @@ test('composite uses selected outputs while the download gallery receives every 
   assert.deepEqual(uploaded.slice(0,2).map(args=>args[0]),['rejected','chosen']);
   const crops=[]; scope.generatePrintImage=async(...args)=>{crops.push(args);return 'crop';};
   assert.equal(await handler('prepareSelectedPrintImage',scope)(),'crop');
-  assert.deepEqual(crops,[['chosen',null,'1x1',0]]);
+  assert.deepEqual(crops,[['chosen',null,'1x1',0,scope.getCaptureLayoutConfig()]]);
 });
 
 test('individual retakes are guarded before confirmation, clear selected output, and keep a batch-sized session clock', () => {
@@ -161,7 +163,7 @@ test('review Retake replaces the current shot before the next candidate is taken
 
 test('per-shot review uses actual frame slot dimensions, with two candidates per output slot', () => {
   const slots=[{width:800,height:500},{width:500,height:900},{width:700,height:700}];
-  const scope={selectedFrame:{id:'custom'},selectedLayoutId:'3x1',getEffectiveLayoutConfig:(frame,layout)=>{
+  const scope={selectedFrame:{id:'custom'},selectedLayoutId:'3x1',getCaptureLayoutConfig:(frame,layout)=>{
     assert.equal(frame.id,'custom');assert.equal(layout,'3x1');return {slots};
   }};
   const getSlot=handler('getReviewPhotoSlot',scope);
@@ -243,9 +245,9 @@ test('Print and Digital use the same full-slot preview in per-shot review and se
 });
 
 test('Print Customize keeps the color composite and adds a separate monochrome label preview', () => {
-  assert.match(source, /<PreviewComponent maxHeightStr=\{isVertical \? '34vh' : '75vh'\} \/>/,
+  assert.match(source, /<PreviewComponent id=\{selectedPackage === 'print' \? 'print-color-preview' : undefined\} maxHeightStr=\{isVertical \? '34vh' : '75vh'\} \/>/,
     'the existing large color/frame preview stays visible');
-  const previewIndex=source.lastIndexOf('<PreviewComponent maxHeightStr=',source.indexOf('id="print-monochrome-preview-panel"'));
+  const previewIndex=source.lastIndexOf('<PreviewComponent id={selectedPackage',source.indexOf('id="print-monochrome-preview-panel"'));
   const panelIndex=source.indexOf('id="print-monochrome-preview-panel"');
   const controlsIndex=source.indexOf('{/* Controls – bottom in vertical, right in horizontal */}',panelIndex);
   const flexRowIndex=source.lastIndexOf('flex flex-row',previewIndex);
@@ -281,12 +283,17 @@ test('changing frame reruns the monochrome renderer even when slot geometry stay
     'frame identity must rerun the monochrome render even when a different frame has identical slot geometry');
 });
 
-test('camera live preview uses the exact same direct canvas for Print and Digital', () => {
-  const scope={selectedPackage:'digital',processingCanvasRef:{},reviewPhotoIndex:null,capturedPhotos:['live'],retakeIndex:null,getReviewPhotoSlot:()=>({}),getNiimbotPrintSettings:()=>({}),React:{createElement:(type,props)=>({type,props})},NiimbotPhotoPreview:'Niimbot'};
+test('Digital camera stays direct; Print display shares only the full processing source', () => {
+  const scope={selectedPackage:'digital',processingCanvasRef:{},printPresentationConfig:{slots:[{width:555,height:555}]},
+    PrintCameraPreview:'PrintCameraPreview',React:{Fragment:'fragment',createElement:(type,props,...children)=>({type,props,children})}};
   const fn=vm.runInNewContext(ts.transpileModule(`(${initializer('renderCameraLivePreview').getText(ast)});`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText,scope);
   const digital=fn();assert.equal(digital.type,'canvas');assert.equal(digital.props.id,'camera-preview');
-  scope.selectedPackage='print';const print=fn();assert.equal(print.type,'canvas','Print must bypass asynchronous Niimbot frame rendering just like Digital');
-  assert.equal(print.props.id,digital.props.id);assert.equal(print.props.ref,digital.props.ref);assert.equal(print.props.className,digital.props.className);
+  scope.selectedPackage='print';const print=fn();
+  assert.equal(print.children[0].type,'canvas');assert.equal(print.children[0].props.ref,digital.props.ref);
+  assert.equal(print.children[0].props.className,'hidden');
+  assert.equal(print.children[1].type,'PrintCameraPreview');
+  assert.equal(print.children[1].props.sourceRef,digital.props.ref);
+  assert.deepEqual(print.children[1].props.slot,{width:555,height:555});
 });
 
 test('replacing a selected photo is one tap for Print and replaces the last output for full Digital selections', () => {
@@ -314,6 +321,7 @@ test('each of 2/4/6 captures pauses for review and only Continue advances to the
   for (const count of [1, 2, 3]) {
     const scope = stateScope({step:'CAPTURE',reviewPhotoIndex:null,captureExpired:false,capturedPhotos:[],candidateCount:count * 2,captureDeadline:null,retakeIndex:null,
       processingCanvasRef:{current:{width:640,height:480}},shutterAudioRef:{current:null},Date,
+      selectedPackage:'digital',printPresentationKey:'digital-fixture',
       selectedLayoutId:'1x1',selectedFrame:null,getEffectiveLayoutConfig:()=>({slots:[{}]}),
       useCallback:fn=>fn,setTimeout:fn=>fn(),document:{createElement:()=>({getContext:()=>({translate(){},scale(){},drawImage(){}}),toDataURL:()=> 'shot'})}});
     scope.state.setCapturedPhotos=[];scope.state.setStep='CAPTURE';

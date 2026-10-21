@@ -16,9 +16,10 @@ test('native rapid double click prints once and shares server/manual success loc
 });
 test('new session clears native success and previous photo choice',()=>{
  const scope={frames:[{}],window:{clearTimeout:()=>{}},printActionInFlightRef:{current:false},printPollTokenRef:{current:0},printPollTimerRef:{current:null},
- finalPhotoUploadPromiseRef:{current:null},sessionCompletedRef:{current:false},clearPersistedPrintJob:()=>{}};
+ finalPhotoUploadPromiseRef:{current:null},printPhotoLayoutRef:{current:{width:638,height:791,slots:[]}},sessionCompletedRef:{current:false},clearPersistedPrintJob:()=>{}};
  const state={};function visit(n){if(ts.isCallExpression(n)&&ts.isIdentifier(n.expression)&&n.expression.text.startsWith('set')){const name=n.expression.text;scope[name]=v=>{state[name]=v;};}ts.forEachChild(n,visit);}visit(initializer('handleStart'));
  fn('handleStart',scope)();assert.equal(state.setBtPrintState,'idle');assert.equal(state.setBtPrintError,null);assert.equal(state.setSelectedPrintPhotoIndex,null);assert.equal(state.setPrintSelectionConfirmed,false);
+ assert.equal(scope.printPhotoLayoutRef.current,null,'new session releases the previous photo geometry lock');
 });
 test('recovered print job uses digital grid URL instead of print-only asset',()=>{
  assert.equal(fn('digitalImageForPrintJob',{})({imageUrl:'https://cdn/print/crop.png',digitalImageUrl:'https://cdn/grid_frame.png'}),'https://cdn/grid_frame.png');
