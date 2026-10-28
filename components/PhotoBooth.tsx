@@ -28,7 +28,7 @@ import {
   verifyPayment, fetchTemplates, queuePrintJob, getPrintJobStatus, KioskApiError,
   getApiConfig, isAutoPrintEnabled, isManualPrintFallbackEnabled,
   submitPaymentEvidence, getPaymentVerificationStatus, fetchPrintingConfig,
-  getSessionPaymentStatus, verifySandboxDuitkuPayment, simpanKonfigurasiServer, sumberKonfigurasi, fetchPackageVisibility,
+  getSessionPaymentStatus, simpanKonfigurasiServer, sumberKonfigurasi, fetchPackageVisibility,
   fetchPhotoboothControlVisibility
 } from '../services/apiService';
 
@@ -1443,13 +1443,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, [capturedPhotos, sessionCode, selectedPackage]);
   const [qrisUrl, setQrisUrl] = useState<string | null>(null);
   const [qrisLoading, setQrisLoading] = useState(false);
-  const [paymentExpiresAt, setPaymentExpiresAt] = useState<string | null>(null);
-  const [paymentEnvironment, setPaymentEnvironment] = useState<string>('');
-  const [merchantOrderId, setMerchantOrderId] = useState<string>('');
-  const [sandboxCopyMessage, setSandboxCopyMessage] = useState<string>('');
-  const [sandboxVerificationMessage, setSandboxVerificationMessage] = useState<string>('');
-  const [sandboxVerificationLoading, setSandboxVerificationLoading] = useState(false);
-  const sandboxOrderInputRef = useRef<HTMLInputElement>(null);
+
   const [finalUploadedUrl, setFinalUploadedUrl] = useState<string | null>(null);
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -2232,12 +2226,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setUniqueCode(null);
       setPaymentMethod('qris_visual_proof');
       setQrisUrl(null);
-      setPaymentExpiresAt(null);
-      setPaymentEnvironment('');
-      setMerchantOrderId('');
-      setSandboxCopyMessage('');
-      setSandboxVerificationMessage('');
-      setSandboxVerificationLoading(false);
+
       setPaymentPollingState('idle');
       setVerificationStatus('');
       setVerificationReasonCodes([]);
@@ -2302,15 +2291,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setSessionCode(sessionData.id);
       setSessionAmount(sessionData.amount ?? null);
       setUniqueCode(sessionData.unique_code ?? null);
-      setPaymentMethod(sessionData.payment_method || 'qris_visual_proof');
+      setPaymentMethod(sessionData.payment_method === 'gopay_merchant_polling' ? 'gopay_merchant_polling' : 'qris_visual_proof');
       setQrisUrl(sessionData.qris_image_url || null);
-      setPaymentExpiresAt(sessionData.payment_expires_at || null);
-      setPaymentEnvironment(sessionData.payment_environment || '');
-      setMerchantOrderId(sessionData.merchant_order_id || '');
-      setSandboxCopyMessage('');
-      setSandboxVerificationMessage('');
-      setSandboxVerificationLoading(false);
-      setPaymentPollingState(['gopay_merchant_polling', 'duitku_qris'].includes(sessionData.payment_method || '') ? 'checking' : 'idle');
+
+      setPaymentPollingState(sessionData.payment_method === 'gopay_merchant_polling' ? 'checking' : 'idle');
       setChallengeId(sessionData.challenge_id || '');
       // Pembayaran bisa dimatikan dari sisi server (payment_profiles.payment_required
       // = false) untuk keperluan uji. Sesi sudah ditandai 'verified' di database,
@@ -2328,60 +2312,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setFlowError(message);
     }
   };
-  const handleSandboxPaymentTest = async () => {
-    if (paymentMethod !== 'duitku_qris' || paymentEnvironment !== 'sandbox' || !merchantOrderId
-      || paymentPollingState === 'expired') return;
-    // Open during the click so clipboard permission does not trigger popup blocking.
-    window.open('https://sandbox.duitku.com/payment/demo/demosuccesstransaction.aspx', '_blank', 'noopener,noreferrer');
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(merchantOrderId);
-      } else {
-        const input = sandboxOrderInputRef.current;
-        if (!input) throw new Error('Order ID input unavailable');
-        input.focus();
-        input.select();
-        if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
-      }
-      setSandboxCopyMessage('Order ID disalin. Paste di simulator, lalu klik Check.');
-    } catch (_) {
-      sandboxOrderInputRef.current?.focus();
-      sandboxOrderInputRef.current?.select();
-      setSandboxCopyMessage('Salin Order ID dari kolom di atas, lalu paste di simulator.');
-    }
-  };
-
-  const handleSandboxVerifyPayment = async () => {
-    if (paymentMethod !== 'duitku_qris' || paymentEnvironment !== 'sandbox' || !sessionCode
-      || sandboxVerificationLoading) return;
-    setSandboxVerificationLoading(true);
-    setSandboxVerificationMessage('Menghubungi Duitku untuk memeriksa status transaksi…');
-    try {
-      const result = await verifySandboxDuitkuPayment(sessionCode);
-      if (result.payment_status === 'verified') {
-        setSandboxVerificationMessage('Pembayaran terverifikasi.');
-        setPaymentPollingState('idle');
-        setFlowError(null);
-        setVerificationStatus('verified');
-        setStep('CAPTURE');
-      } else if (result.payment_status === 'expired') {
-        setSandboxVerificationMessage('Transaksi Sandbox sudah kedaluwarsa. Silakan mulai sesi baru.');
-        setPaymentPollingState('expired');
-      } else {
-        setSandboxVerificationMessage('Pembayaran belum terdeteksi oleh Duitku. Tunggu sebentar, lalu verifikasi lagi.');
-        setPaymentPollingState('waiting');
-      }
-    } catch (error) {
-      setSandboxVerificationMessage(error instanceof KioskApiError
-        ? error.message
-        : 'Verifikasi pembayaran Sandbox gagal. Silakan coba lagi.');
-    } finally {
-      setSandboxVerificationLoading(false);
-    }
-  };
-
   const handlePaymentConfirm = () => {
-    if (paymentMethod === 'duitku_qris') return;
     setFlowError(null);
     setVerificationStatus('');
     setVerificationReasonCodes([]);
@@ -2830,23 +2761,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     runScanWindow();
   }, [step]);
 
-  // Dev testing shortcut: Only active during local dev, disabled in production
-  useEffect(() => {
-    if (!import.meta.env.DEV || paymentMethod === 'duitku_qris') return;
-
-    const handleDevKey = (e: KeyboardEvent) => {
-      if ((e.key === 'p' || e.key === 'P') && ['PAYMENT', 'PAYMENT_SCAN', 'PAYMENT_CHECKING'].includes(step)) {
-        console.log('[Dev] Payment bypass shortcut triggered');
-        setVerificationStatus('verified');
-        setScanningHint('Bypass Developer: Pembayaran Disetujui!');
-        setTimeout(() => {
-          setStep('CAPTURE');
-        }, 400);
-      }
-    };
-    window.addEventListener('keydown', handleDevKey);
-    return () => window.removeEventListener('keydown', handleDevKey);
-  }, [step, paymentMethod]);
+  // Payment-required policy is enforced in development as well as production.
+  // Only the server's explicit Admin-disabled-payment response may skip payment.
 
   const handleFinish = () => {
     if (step !== 'EDIT' || !printSelectionConfirmed || selectedOutputPhotos.length !== outputCount) return;
@@ -3312,7 +3228,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   // Re-fetch QRIS image every time user enters PAYMENT step
   useEffect(() => {
-    if (step === 'PAYMENT' && paymentMethod !== 'duitku_qris') {
+    if (step === 'PAYMENT') {
       setQrisUrl(null);
       setQrisLoading(true);
       fetchPaymentProfile()
@@ -3325,7 +3241,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   }, [step, paymentMethod]);
 
   useEffect(() => {
-    if (step !== 'PAYMENT' || !['gopay_merchant_polling', 'duitku_qris'].includes(paymentMethod) || !sessionCode) return;
+    if (step !== 'PAYMENT' || paymentMethod !== 'gopay_merchant_polling' || !sessionCode) return;
 
     let cancelled = false;
     let timer: number | null = null;
@@ -4091,7 +4007,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                             <div className="flex flex-col items-center w-full max-w-[260px] md:max-w-[320px]">
                                 <div className="w-full bg-white flex flex-col items-center justify-center p-4 md:p-5 shadow-2xl rounded-2xl animate-scale-in relative">
                                     <div className="flex justify-between items-center w-full mb-3 px-2">
-                                        <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">{paymentMethod === 'duitku_qris' ? 'QRIS Dinamis' : 'QRIS'}</span>
+                                        <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">QRIS</span>
                                         <span className="text-[#00aead] font-black text-lg md:text-xl">
                                             {payableAmount === null
                                               ? 'Harga belum tersedia'
@@ -4105,9 +4021,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                       </div>
                                     )}
                                     <div className="flex-1 flex items-center justify-center w-full">
-                                        {paymentMethod === 'duitku_qris' && paymentPollingState === 'expired' ? (
-                                            <div className="w-full h-[40vh] flex items-center justify-center text-center text-gray-500 p-4">QRIS kedaluwarsa. Kembali untuk membuat transaksi baru.</div>
-                                        ) : qrisUrl ? (
+                                        {qrisUrl ? (
                                             <img
                                               key={qrisUrl}
                                               src={qrisUrl}
@@ -4123,7 +4037,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                     </div>
                                 </div>
                                 
-                                {['gopay_merchant_polling', 'duitku_qris'].includes(paymentMethod) ? (
+                                {paymentMethod === 'gopay_merchant_polling' ? (
                                   <div className="mt-4 md:mt-6 w-full rounded-xl border border-white/20 bg-white/10 p-4 text-center text-white">
                                     <div className="flex items-center justify-center gap-2 font-bold">
                                       {paymentPollingState === 'expired' ? (
@@ -4146,55 +4060,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                           ? 'Silakan kembali dan mulai sesi baru.'
                                           : paymentPollingState === 'retrying'
                                             ? 'Koneksi ke server terputus sementara. Pemeriksaan akan dicoba lagi otomatis.'
-                                          : paymentMethod === 'duitku_qris'
-                                            ? 'Scan QRIS untuk transaksi ini. Sesi lanjut otomatis setelah pembayaran dikonfirmasi Duitku.'
                                             : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
                                     </p>
                                     {flowError && <p className="mt-2 text-sm font-semibold text-amber-300">{flowError}</p>}
-                                    {paymentMethod === 'duitku_qris' && (
-                                      <p className="mt-2 text-xs text-white/75">
-                                        {paymentEnvironment === 'sandbox' && <strong className="block text-amber-300">Duitku Sandbox — pengujian</strong>}
-                                        {paymentExpiresAt && <>Berlaku sampai {new Date(paymentExpiresAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
-                                      </p>
-                                    )}
-                                    {paymentMethod === 'duitku_qris' && paymentEnvironment === 'sandbox' && merchantOrderId && (
-                                      <div className="mt-3 border-t border-white/15 pt-3 text-left">
-                                        <label htmlFor="sandbox-merchant-order-id" className="block text-xs font-bold text-white/75">Merchant Order ID</label>
-                                        <input
-                                          ref={sandboxOrderInputRef}
-                                          id="sandbox-merchant-order-id"
-                                          readOnly
-                                          value={merchantOrderId}
-                                          onFocus={event => event.currentTarget.select()}
-                                          className="mt-1 w-full rounded-lg border border-white/20 bg-white/10 px-2 py-2 font-mono text-xs text-white"
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={handleSandboxPaymentTest}
-                                          disabled={paymentPollingState === 'expired'}
-                                          className="mt-2 w-full rounded-lg bg-[#f6cd46] px-3 py-2 text-sm font-bold text-black hover:bg-[#e5bc35] disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                          Salin Order ID &amp; Buka Simulator
-                                        </button>
-                                        <p aria-live="polite" className="mt-2 text-xs text-white/75">
-                                          {sandboxCopyMessage || 'Pilih metode QRIS yang sesuai di simulator, lalu paste Order ID.'}
-                                        </p>
-                                        <button
-                                          type="button"
-                                          onClick={handleSandboxVerifyPayment}
-                                          disabled={sandboxVerificationLoading}
-                                          className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3 py-2 text-sm font-bold text-white transition hover:bg-white/20 disabled:cursor-wait disabled:opacity-60"
-                                        >
-                                          {sandboxVerificationLoading
-                                            ? <><Loader2 size={16} className="animate-spin" /> Memeriksa pembayaran…</>
-                                            : <><RefreshCw size={16} /> Verifikasi Pembayaran</>}
-                                        </button>
-                                        <p aria-live="polite" className="mt-2 min-h-4 text-xs text-white/75">
-                                          {sandboxVerificationMessage}
-                                        </p>
-                                      </div>
-                                    )}
-                                    {paymentMethod !== 'duitku_qris' && paymentPollingState !== 'expired' && (
+                                    {paymentPollingState !== 'expired' && (
                                       <button onClick={handlePaymentConfirm} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-white/80 underline underline-offset-2 hover:text-white">
                                         Periksa lewat kamera
                                       </button>

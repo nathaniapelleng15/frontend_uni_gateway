@@ -8,7 +8,7 @@ test('Print presentation fallback is the calibrated photo box, Digital retains i
   assert.equal(typeof geometry.resolvePackagePhotoLayout, 'function', 'missing package-specific photo geometry');
   assert.equal(geometry.resolvePackagePhotoLayout('digital', digital), digital);
   assert.deepEqual(geometry.resolvePackagePhotoLayout('print', digital), {
-    width: 638, height: 791, slots: [{x: 0, y: 71, width: 555, height: 555}],
+    width: 638, height: 791, slots: [{x: 0, y: 59, width: 555, height: 567}],
   });
 });
 

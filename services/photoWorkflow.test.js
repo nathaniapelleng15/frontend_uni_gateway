@@ -214,7 +214,7 @@ test('Niimbot paper geometry and adjustments remain available to physical Print 
     photoAdjust:{fitMode:'fit'},thermalDensity:3,thermalOffsetYPx:0,thermalOffsetXPx:0,isGrayscaleAlgorithm:()=>false,DEFAULT_GRAYSCALE_ALGORITHM:'rec601'};
   const resolve=handler('getNiimbotPrintSettings',scope);const settings=resolve();
   assert.equal(settings.size.widthPx,638);assert.equal(settings.size.heightPx,791);
-  assert.equal(settings.adjustments.marginTopPx,71);assert.equal(settings.adjustments.marginBottomPx,165);
+  assert.equal(settings.adjustments.marginTopPx,59);assert.equal(settings.adjustments.marginBottomPx,165);
   assert.equal(settings.adjustments.fitMode,'cover');
   scope.printMarginTopPx=100;scope.printMarginBottomPx=124;scope.photoAdjust.fitMode='stretch';
   assert.equal(resolve().adjustments.marginTopPx,100);assert.equal(resolve().adjustments.fitMode,'stretch');
@@ -357,15 +357,16 @@ test('frame decorations stay behind photo slots so changing a frame cannot cover
 });
 
 
-test('Sandbox payment screen exposes a manual provider verification action only in the sandbox order panel', async () => {
-  assert.match(source, /paymentEnvironment === 'sandbox' && merchantOrderId/);
-  assert.match(source, /onClick=\{handleSandboxVerifyPayment\}/);
-  assert.match(source, /Verifikasi Pembayaran/);
-  assert.match(apiSource, /url: `\/sessions\/\$\{encodeURIComponent\(sessionCode\)\}\/payment-verification\/check`/);
-  const scope = stateScope({paymentMethod:'duitku_qris',paymentEnvironment:'sandbox',sessionCode:'sandbox-1',sandboxVerificationLoading:false,
-    verifySandboxDuitkuPayment:async()=>({payment_status:'verified'}),KioskApiError:class extends Error{}});
-  await handler('handleSandboxVerifyPayment',scope)();
-  assert.equal(scope.state.setStep,'CAPTURE');
-  assert.equal(scope.state.setVerificationStatus,'verified');
-  assert.equal(scope.state.setSandboxVerificationLoading,false);
+test('legacy session provider values cannot divert required payments away from visual proof', async () => {
+  for (const payment_required of [true, undefined, false]) {
+    const scope = stateScope({selectedPackage:'digital',frames:[{id:'1x1',styles:[{id:1}]}],
+      isWorkflowLayoutAllowed:()=>true,getEffectiveLayoutConfig:()=>({slots:[{}]}),
+      printPhotoLayoutRef:{current:null},getAppConfig:()=>({kioskId:'K-001'}),KioskApiError:Error,
+      startSession:async()=>({id:'legacy-session',payment_method:'duitku_qris',payment_required,package_type:'digital'})});
+    await handler('handleLayoutSelect',scope)('1x1');
+    assert.equal(scope.state.setPaymentMethod,'qris_visual_proof');
+    assert.equal(scope.state.setPaymentPollingState,'idle');
+    assert.equal(scope.state.setStep,payment_required === false ? 'CAPTURE' : 'PAYMENT');
+    if (payment_required !== false) assert.notEqual(scope.state.setVerificationStatus,'verified');
+  }
 });

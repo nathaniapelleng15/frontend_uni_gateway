@@ -9,13 +9,7 @@ export default defineConfig(({ mode }) => {
         port: 3000,
         host: '0.0.0.0',
         allowedHosts: true,
-        // A tunnel serving the Vite photobooth can deliver Duitku callbacks to API.
-        proxy: {
-          '/api/payments/duitku/callback': {
-            target: env.BACKEND_PROXY_TARGET || 'http://127.0.0.1:8000',
-            changeOrigin: true,
-          },
-        },
+
       },
       plugins: [react()],
       build: {

@@ -130,10 +130,10 @@ export function labelMmFromPaperSize(paperSize: string | null | undefined): { wi
  * boleh diisi tinta. Kalau foto diisi ke seluruh kertas, gambar menimpa bingkai
  * dan nomor frame — hasilnya terlihat "tidak sesuai" walau printernya benar.
  *
- * Kalibrasi percobaan: kotak naik 6 px (~0,05 cm) dari Y=77 ke Y=71.
- * Ukuran tetap 555 x 555 px (46,99 x 46,99 mm), x=0 y=71.
- * Margin kiri/atas/kanan/bawah 0/71/83/165; kanvas tetap 638 x 791:
- *   0 + 555 + 83 = 638; 71 + 555 + 165 = 791.
+ * Target 555 x 567 px (46,99 x 48,01 mm), x=0 y=59.
+ * Dari acuan Y=35, turun 0,2 cm: round(2 / 25,4 * 300) = 24 px.
+ * Margin kiri/atas/kanan/bawah 0/59/83/165; kanvas tetap 638 x 791:
+ *   0 + 555 + 83 = 638; 59 + 567 + 165 = 791.
  * Mode cover menjaga rasio sumber; hasil fisik masih perlu diverifikasi.
  *
  * `fitMode: 'cover'` bukan pilihan gaya: bingkai yang sudah tercetak menuntut
@@ -147,7 +147,7 @@ export const LABEL_FRAME_BOX_PX: Record<string, {
   bottomPx: number;
   fitMode: 'cover' | 'fit' | 'stretch';
 }> = {
-  'nimbotpaper-polaroid': { topPx: 71, rightPx: 83, leftPx: 0, bottomPx: 165, fitMode: 'cover' },
+  'nimbotpaper-polaroid': { topPx: 59, rightPx: 83, leftPx: 0, bottomPx: 165, fitMode: 'cover' },
 };
 
 /**

@@ -35,6 +35,7 @@ const App: React.FC = () => {
   const [backendError, setBackendError] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState(() => getAppConfig().apiKey || '');
   const [pastedKioskId, setPastedKioskId] = useState('');
+  const [clipboardMessage, setClipboardMessage] = useState('');
 
   // Subscribe to Kiosk Agent Maintenance Mode Signal
   useEffect(() => {
@@ -73,7 +74,24 @@ const App: React.FC = () => {
       .finally(() => setIsInitializing(false));
   };
 
+  const pasteApiKeyFromClipboard = async () => {
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('Clipboard unavailable');
+      const credentials = parseAdminKioskCredentials(await navigator.clipboard.readText());
+      if (!isUsableKioskApiKey(credentials.apiKey)) {
+        setClipboardMessage('Clipboard kosong atau salinan Admin tidak lengkap. Salin DEVICE_TOKEN dari Admin yang sesuai backend ini.');
+        return;
+      }
+      setApiKeyInput(credentials.apiKey);
+      setPastedKioskId(credentials.kioskId || '');
+      setClipboardMessage('API key berhasil ditempel. Klik Simpan API key & coba lagi.');
+    } catch {
+      setClipboardMessage('Browser tidak mengizinkan baca clipboard. Klik kolom API key lalu tekan Ctrl+V (Windows) atau Cmd+V (Mac), atau gunakan menu Tempel.');
+    }
+  };
+
   const handleCredentialsPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    setClipboardMessage('');
     const text = event.clipboardData.getData('text');
     if (!/DEVICE_(?:ID|TOKEN)\s*=/i.test(text)) return;
     event.preventDefault(); // input type=password discards line breaks before onChange sees them
@@ -152,12 +170,22 @@ const App: React.FC = () => {
               id="kiosk-api-key"
               type="password"
               value={apiKeyInput}
-              onChange={(event) => { setApiKeyInput(event.target.value); setPastedKioskId(''); }}
+              onChange={(event) => { setApiKeyInput(event.target.value); setPastedKioskId(''); setClipboardMessage(''); }}
               onPaste={handleCredentialsPaste}
               placeholder="Tempel Copy API Key dari Admin (DEVICE_ID + DEVICE_TOKEN)"
               autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
               className="w-full rounded-xl border border-white/20 bg-black/20 px-4 py-3 font-mono text-sm text-white outline-none focus:border-white/60"
             />
+            <button
+              type="button"
+              onClick={pasteApiKeyFromClipboard}
+              className="rounded-xl border border-white/30 px-5 py-3 font-bold text-white hover:bg-white/10"
+            >
+              Tempel dari clipboard
+            </button>
+            {clipboardMessage && <p role="status" className="text-sm text-white/80">{clipboardMessage}</p>}
             <button type="submit" className="rounded-xl bg-white px-5 py-3 font-bold text-[#0c1633]">
               Simpan API key &amp; coba lagi
             </button>

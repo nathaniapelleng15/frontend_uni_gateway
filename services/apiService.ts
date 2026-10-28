@@ -101,12 +101,8 @@ export interface SessionData {
    */
   payment_required?: boolean;
   qris_image_url?: string | null;
-  payment_url?: string | null;
-  payment_expires_at?: string | null;
-  payment_environment?: string;
-  merchant_order_id?: string;
   package_type?: 'digital' | 'digital_print';
-  payment_method?: 'duitku_qris' | 'qris_visual_proof' | 'gopay_merchant_polling' | string;
+  payment_method?: 'qris_visual_proof' | 'gopay_merchant_polling';
 }
 
 export interface SessionPaymentStatus {
@@ -299,29 +295,12 @@ export const startSession = async (
     challenge_id: challengeId,
     unique_code: Number.isInteger(uniqueCode) && uniqueCode > 0 ? uniqueCode : null,
     qris_image_url: (data.data as any)?.qris_image_url || null,
-    payment_url: (data.data as any)?.payment_url || null,
-    payment_expires_at: (data.data as any)?.payment_expires_at || null,
-    payment_environment: (data.data as any)?.payment_environment,
-    merchant_order_id: (data.data as any)?.merchant_order_id,
     package_type: (data.data as any)?.package_type,
-    payment_method: (data.data as any)?.payment_method || 'qris_visual_proof',
+    payment_method: (data.data as any)?.payment_method === 'gopay_merchant_polling' ? 'gopay_merchant_polling' : 'qris_visual_proof',
     // false = server sedang mematikan pembayaran (payment_profiles.payment_required
     // = false) untuk keperluan uji; layar bayar dilewati.
     payment_required: (data.data as any)?.payment_required !== false
   };
-};
-
-export const verifySandboxDuitkuPayment = async (
-  sessionCode: string
-): Promise<{ payment_status: 'pending' | 'verified' | 'expired' }> => {
-  const response = await request<ApiResponse<{ payment_status: 'pending' | 'verified' | 'expired' }>>({
-    method: 'POST',
-    url: `/sessions/${encodeURIComponent(sessionCode)}/payment-verification/check`,
-  });
-  if (!response.data.success || !response.data.data) {
-    throw new KioskApiError(response.data.message || 'Verifikasi pembayaran Sandbox gagal.', response.status);
-  }
-  return response.data.data;
 };
 
 export const getSessionPaymentStatus = async (sessionCode: string): Promise<SessionPaymentStatus> => {
