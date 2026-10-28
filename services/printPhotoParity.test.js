@@ -33,12 +33,12 @@ test('real shutter captures Print canonical box while Digital keeps full process
       document:{createElement:()=>output},setCapturedPhotos: fn=>captured.push(...fn([])),
       setCountdown(){},setRetakeIndex(){},setReviewPhotoIndex(){},setIsAutoCapturing(){},setCaptureExpired(){}};
     handler('takePhoto',scope)();
-    assert.equal(captured[0], selectedPackage==='print'?'555x567':'1920x1080');
+    assert.equal(captured[0], selectedPackage==='print'?'555x573':'1920x1080');
     const draw = calls.at(-1);
     if (selectedPackage==='print') {
-      assert.ok(Math.abs(draw[1] - (1920 - 1080 * 555 / 567) / 2) < 1e-9);
-      assert.ok(Math.abs(draw[3] - 1080 * 555 / 567) < 1e-9);
-      assert.deepEqual([draw[2],...draw.slice(4)],[0,1080,0,0,555,567]);
+      assert.ok(Math.abs(draw[1] - (1920 - 1080 * 555 / 573) / 2) < 1e-9);
+      assert.ok(Math.abs(draw[3] - 1080 * 555 / 573) < 1e-9);
+      assert.deepEqual([draw[2],...draw.slice(4)],[0,1080,0,0,555,573]);
     }
     else assert.deepEqual(draw,[canvas,0,0]);
   }
@@ -62,9 +62,9 @@ test('capture thumbnails show the square photo but Admin frame and filter thumbn
     'original Admin frame border stays the same for both packages');
 });
 
-test('real print asset painter consumes canonical 555x567 directly, never old portrait layout', async () => {
+test('real print asset painter consumes canonical 555x573 directly, never old portrait layout', async () => {
   const calls = [];
-  const image = {naturalWidth:555,naturalHeight:567};
+  const image = {naturalWidth:555,naturalHeight:573};
   const ctx = {fillRect:(...args)=>calls.push(['fill',...args]),drawImage:(...args)=>calls.push(['draw',...args])};
   const output = {getContext:()=>ctx,toDataURL:()=>`${output.width}x${output.height}`};
   const {paintPrintImage} = await import('./printImage.ts');
@@ -73,8 +73,8 @@ test('real print asset painter consumes canonical 555x567 directly, never old po
     loadImageElement:async()=>image,document:{createElement:()=>output},paintPrintImage,console,
   });
   const layout = resolvePackagePhotoLayout('print',{width:728,height:1088,slots:[]});
-  assert.equal(await fn('canonical',null,'1x1',0,layout),'555x567');
-  assert.deepEqual(calls,[['fill',0,0,555,567],['draw',image,0,0,555,567,0,0,555,567]]);
+  assert.equal(await fn('canonical',null,'1x1',0,layout),'555x573');
+  assert.deepEqual(calls,[['fill',0,0,555,573],['draw',image,0,0,555,573,0,0,555,573]]);
 });
 
 test('real Print display canvas draws the same crop as shutter and guide bounds match its displayed rectangle', () => {
@@ -120,5 +120,5 @@ test('real print guard refuses unavailable or changed geometry without touching 
   handler('assertPrintPhotoGeometryCurrent',scope)();
   assert.throws(()=>handler('assertPrintPhotoGeometryCurrent',{...scope,hasPrintGeometrySettings:false})(),/belum tersedia/);
   assert.throws(()=>handler('assertPrintPhotoGeometryCurrent',{...scope,getLivePrintLayoutConfig:()=>({...captured,height:792})})(),/ukuran Niimbot berubah/);
-  assert.deepEqual(captured.slots,[{x:0,y:59,width:555,height:567}]);
+  assert.deepEqual(captured.slots,[{x:0,y:70,width:555,height:573}]);
 });

@@ -43,12 +43,12 @@ test('kanvas = ukuran kertas pada 300 dpi, tepat 1 px = 1/300 inci', () => {
   assert.strictEqual(labelSize(54, 67, 384).widthPx, 638, 'dpi tidak ikut berubah dengan kepala cetak');
 });
 
-test('kotak aman cetak 46,99 x 48,01 mm — dibuktikan lewat inci, bukan lewat kode yang sama', () => {
-  const box = printBox(638, 791, 59, 83, 0, 165, B1_PRO_PRINTHEAD_PX);
-  assert.deepEqual(box, { x: 0, y: 59, w: 555, h: 567 });
+test('kotak aman cetak 46,99 x 46,99 mm — dibuktikan lewat inci, bukan lewat kode yang sama', () => {
+  const box = printBox(638, 791, 70, 83, 0, 148, B1_PRO_PRINTHEAD_PX);
+  assert.deepEqual(box, { x: 0, y: 70, w: 555, h: 573 });
   // 555 px pada 300 dpi = 46,99 mm. Dihitung dari definisi inci.
   assert.ok(Math.abs((box.w / 300) * 25.4 - 46.99) < 0.01, 'lebar kotak 46,99 mm');
-  assert.ok(Math.abs((box.h / 300) * 25.4 - 48.01) < 0.01, 'tinggi kotak 48,01 mm');
+  assert.ok(Math.abs((box.h / 300) * 25.4 - 48.51) < 0.01, 'tinggi kotak 48,51 mm');
   assert.ok(box.x + box.w <= B1_PRO_PRINTHEAD_PX, 'tepi kanan masih di dalam kepala cetak');
 });
 
@@ -67,8 +67,8 @@ test('foto sumber punya detail >= 300 dpi di dalam kotak (tidak ada upscale)', (
   const srcW = Number(slot![1]);
   const srcH = Number(slot![2]);
 
-  const box = printBox(638, 791, 59, 83, 0, 165, B1_PRO_PRINTHEAD_PX);
-  const r = drawRect('cover', 638, 791, srcW, srcH, 0, 0, 59, 83, 0, 165, B1_PRO_PRINTHEAD_PX);
+  const box = printBox(638, 791, 70, 83, 0, 148, B1_PRO_PRINTHEAD_PX);
+  const r = drawRect('cover', 638, 791, srcW, srcH, 0, 0, 70, 83, 0, 148, B1_PRO_PRINTHEAD_PX);
 
   // Piksel sumber per piksel yang dicetak: >= 1 berarti tidak ada peregangan.
   const perX = srcW / r.dw;
@@ -85,7 +85,7 @@ test('preset label Polaroid memakai angka px yang sama dengan 300 dpi', () => {
   const f = labelFrameBox('nimbotpaper-polaroid')!;
   assert.deepEqual(
     { topPx: f.topPx, rightPx: f.rightPx, leftPx: f.leftPx, bottomPx: f.bottomPx },
-    { topPx: mmToPx(59 / (300 / 25.4)), rightPx: mmToPx(83 / (300 / 25.4)), leftPx: 0, bottomPx: mmToPx(165 / (300 / 25.4)) },
+    { topPx: mmToPx(70 / (300 / 25.4)), rightPx: mmToPx(83 / (300 / 25.4)), leftPx: 0, bottomPx: mmToPx(148 / (300 / 25.4)) },
     'margin preset harus tepat pada 300 dpi',
   );
   assert.strictEqual(f.fitMode, 'cover');

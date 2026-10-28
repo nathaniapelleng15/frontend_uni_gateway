@@ -147,7 +147,7 @@ export const LABEL_FRAME_BOX_PX: Record<string, {
   bottomPx: number;
   fitMode: 'cover' | 'fit' | 'stretch';
 }> = {
-  'nimbotpaper-polaroid': { topPx: 59, rightPx: 83, leftPx: 0, bottomPx: 165, fitMode: 'cover' },
+  'nimbotpaper-polaroid': { topPx: 70, rightPx: 83, leftPx: 0, bottomPx: 148, fitMode: 'cover' },
 };
 
 /**
