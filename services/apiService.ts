@@ -101,8 +101,10 @@ export interface SessionData {
    */
   payment_required?: boolean;
   qris_image_url?: string | null;
+  payment_expires_at?: string | null;
+  payment_environment?: string;
   package_type?: 'digital' | 'digital_print';
-  payment_method?: 'qris_visual_proof' | 'gopay_merchant_polling';
+  payment_method?: 'duitku_qris' | 'qris_visual_proof' | 'gopay_merchant_polling';
 }
 
 export interface SessionPaymentStatus {
@@ -295,8 +297,10 @@ export const startSession = async (
     challenge_id: challengeId,
     unique_code: Number.isInteger(uniqueCode) && uniqueCode > 0 ? uniqueCode : null,
     qris_image_url: (data.data as any)?.qris_image_url || null,
+    payment_expires_at: (data.data as any)?.payment_expires_at || null,
+    payment_environment: (data.data as any)?.payment_environment,
     package_type: (data.data as any)?.package_type,
-    payment_method: (data.data as any)?.payment_method === 'gopay_merchant_polling' ? 'gopay_merchant_polling' : 'qris_visual_proof',
+    payment_method: ['duitku_qris', 'gopay_merchant_polling'].includes((data.data as any)?.payment_method) ? (data.data as any).payment_method : 'qris_visual_proof',
     // false = server sedang mematikan pembayaran (payment_profiles.payment_required
     // = false) untuk keperluan uji; layar bayar dilewati.
     payment_required: (data.data as any)?.payment_required !== false

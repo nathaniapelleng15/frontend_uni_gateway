@@ -214,7 +214,7 @@ test('Niimbot paper geometry and adjustments remain available to physical Print 
     photoAdjust:{fitMode:'fit'},thermalDensity:3,thermalOffsetYPx:0,thermalOffsetXPx:0,isGrayscaleAlgorithm:()=>false,DEFAULT_GRAYSCALE_ALGORITHM:'rec601'};
   const resolve=handler('getNiimbotPrintSettings',scope);const settings=resolve();
   assert.equal(settings.size.widthPx,638);assert.equal(settings.size.heightPx,791);
-  assert.equal(settings.adjustments.marginTopPx,59);assert.equal(settings.adjustments.marginBottomPx,165);
+  assert.equal(settings.adjustments.marginTopPx,70);assert.equal(settings.adjustments.marginBottomPx,148);
   assert.equal(settings.adjustments.fitMode,'cover');
   scope.printMarginTopPx=100;scope.printMarginBottomPx=124;scope.photoAdjust.fitMode='stretch';
   assert.equal(resolve().adjustments.marginTopPx,100);assert.equal(resolve().adjustments.fitMode,'stretch');
@@ -284,16 +284,21 @@ test('changing frame reruns the monochrome renderer even when slot geometry stay
 });
 
 test('Digital camera stays direct; Print display shares only the full processing source', () => {
-  const scope={selectedPackage:'digital',processingCanvasRef:{},printPresentationConfig:{slots:[{width:555,height:555}]},
+  const scope={selectedPackage:'digital',isVertical:true,processingCanvasRef:{},printPresentationConfig:{slots:[{width:555,height:555}]},
     PrintCameraPreview:'PrintCameraPreview',React:{Fragment:'fragment',createElement:(type,props,...children)=>({type,props,children})}};
   const fn=vm.runInNewContext(ts.transpileModule(`(${initializer('renderCameraLivePreview').getText(ast)});`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None,jsx:ts.JsxEmit.React}}).outputText,scope);
   const digital=fn();assert.equal(digital.type,'canvas');assert.equal(digital.props.id,'camera-preview');
+  assert.match(digital.props.className, /object-cover/);
+  scope.isVertical=false;
+  assert.match(fn().props.className, /portrait:object-cover/);
+  scope.isVertical=true;
   scope.selectedPackage='print';const print=fn();
   assert.equal(print.children[0].type,'canvas');assert.equal(print.children[0].props.ref,digital.props.ref);
   assert.equal(print.children[0].props.className,'hidden');
   assert.equal(print.children[1].type,'PrintCameraPreview');
   assert.equal(print.children[1].props.sourceRef,digital.props.ref);
   assert.deepEqual(print.children[1].props.slot,{width:555,height:555});
+  assert.equal(print.children[1].props.fillPortrait,true);
 });
 
 test('replacing a selected photo is one tap for Print and replaces the last output for full Digital selections', () => {
@@ -357,15 +362,15 @@ test('frame decorations stay behind photo slots so changing a frame cannot cover
 });
 
 
-test('legacy session provider values cannot divert required payments away from visual proof', async () => {
+test('Duitku sessions enter payment without bypassing Admin payment policy', async () => {
   for (const payment_required of [true, undefined, false]) {
     const scope = stateScope({selectedPackage:'digital',frames:[{id:'1x1',styles:[{id:1}]}],
       isWorkflowLayoutAllowed:()=>true,getEffectiveLayoutConfig:()=>({slots:[{}]}),
       printPhotoLayoutRef:{current:null},getAppConfig:()=>({kioskId:'K-001'}),KioskApiError:Error,
       startSession:async()=>({id:'legacy-session',payment_method:'duitku_qris',payment_required,package_type:'digital'})});
     await handler('handleLayoutSelect',scope)('1x1');
-    assert.equal(scope.state.setPaymentMethod,'qris_visual_proof');
-    assert.equal(scope.state.setPaymentPollingState,'idle');
+    assert.equal(scope.state.setPaymentMethod,'duitku_qris');
+    assert.equal(scope.state.setPaymentPollingState,'checking');
     assert.equal(scope.state.setStep,payment_required === false ? 'CAPTURE' : 'PAYMENT');
     if (payment_required !== false) assert.notEqual(scope.state.setVerificationStatus,'verified');
   }

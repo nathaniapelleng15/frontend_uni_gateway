@@ -1453,6 +1453,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [sessionAmount, setSessionAmount] = useState<number | null>(null);
   const [uniqueCode, setUniqueCode] = useState<number | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<string>('qris_visual_proof');
+  const [paymentExpiresAt, setPaymentExpiresAt] = useState<string | null>(null);
+  const [paymentEnvironment, setPaymentEnvironment] = useState<string>('');
   const [paymentPollingState, setPaymentPollingState] = useState<'idle' | 'checking' | 'waiting' | 'retrying' | 'expired'>('idle');
   
   // New visual payment verification states
@@ -2167,6 +2169,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     if (canvas.width !== results.image.width) { canvas.width = results.image.width; canvas.height = results.image.height; }
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Keep the same source orientation as drawVideoDirectly.
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'source-in';
     ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
@@ -2225,6 +2230,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setSessionAmount(null);
       setUniqueCode(null);
       setPaymentMethod('qris_visual_proof');
+      setPaymentExpiresAt(null);
+      setPaymentEnvironment('');
       setQrisUrl(null);
 
       setPaymentPollingState('idle');
@@ -2291,10 +2298,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       setSessionCode(sessionData.id);
       setSessionAmount(sessionData.amount ?? null);
       setUniqueCode(sessionData.unique_code ?? null);
-      setPaymentMethod(sessionData.payment_method === 'gopay_merchant_polling' ? 'gopay_merchant_polling' : 'qris_visual_proof');
+      setPaymentMethod(sessionData.payment_method || 'qris_visual_proof');
       setQrisUrl(sessionData.qris_image_url || null);
-
-      setPaymentPollingState(sessionData.payment_method === 'gopay_merchant_polling' ? 'checking' : 'idle');
+      setPaymentExpiresAt(sessionData.payment_expires_at || null);
+      setPaymentEnvironment(sessionData.payment_environment || '');
+      setPaymentPollingState(['duitku_qris', 'gopay_merchant_polling'].includes(sessionData.payment_method || '') ? 'checking' : 'idle');
       setChallengeId(sessionData.challenge_id || '');
       // Pembayaran bisa dimatikan dari sisi server (payment_profiles.payment_required
       // = false) untuk keperluan uji. Sesi sudah ditandai 'verified' di database,
@@ -2313,6 +2321,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     }
   };
   const handlePaymentConfirm = () => {
+    if (paymentMethod === 'duitku_qris') return;
     setFlowError(null);
     setVerificationStatus('');
     setVerificationReasonCodes([]);
@@ -3226,22 +3235,24 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       }
   }, [step, areAssetsReady, finalUploadedUrl, uploadStatus]);
 
-  // Re-fetch QRIS image every time user enters PAYMENT step
+  // Gateway sessions already carry their own QR; never replace it with the Admin image.
   useEffect(() => {
-    if (step === 'PAYMENT') {
+    if (step === 'PAYMENT' && paymentMethod !== 'duitku_qris') {
+      let cancelled = false;
       setQrisUrl(null);
       setQrisLoading(true);
       fetchPaymentProfile()
-        .then(url => { if (url) setQrisUrl(url); })
+        .then(url => { if (!cancelled && url) setQrisUrl(url); })
         .catch(error => {
-          setFlowError(error instanceof KioskApiError ? error.message : 'QRIS gagal dimuat dari backend utama.');
+          if (!cancelled) setFlowError(error instanceof KioskApiError ? error.message : 'QRIS gagal dimuat dari backend utama.');
         })
-        .finally(() => setQrisLoading(false));
+        .finally(() => { if (!cancelled) setQrisLoading(false); });
+      return () => { cancelled = true; };
     }
   }, [step, paymentMethod]);
 
   useEffect(() => {
-    if (step !== 'PAYMENT' || paymentMethod !== 'gopay_merchant_polling' || !sessionCode) return;
+    if (step !== 'PAYMENT' || !['duitku_qris', 'gopay_merchant_polling'].includes(paymentMethod) || !sessionCode) return;
 
     let cancelled = false;
     let timer: number | null = null;
@@ -3623,8 +3634,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
   const renderCameraLivePreview = () => selectedPackage === 'print' ? <>
     <canvas ref={processingCanvasRef} className="hidden" aria-hidden="true" />
-    <PrintCameraPreview sourceRef={processingCanvasRef} slot={printPresentationConfig.slots[0]} />
-  </> : <canvas id="camera-preview" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />;
+    <PrintCameraPreview sourceRef={processingCanvasRef} slot={printPresentationConfig.slots[0]} fillPortrait={isVertical} />
+  </> : <canvas id="camera-preview" ref={processingCanvasRef} className={`w-full h-full transform scale-x-[-1] ${isVertical ? 'object-cover' : 'object-contain portrait:object-cover'}`} />;
 
   const renderCandidatePreview = (index: number, review = false) => review
     ? <ReviewPhotoPreview index={index} />
@@ -4021,7 +4032,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                       </div>
                                     )}
                                     <div className="flex-1 flex items-center justify-center w-full">
-                                        {qrisUrl ? (
+                                        {paymentMethod === 'duitku_qris' && paymentPollingState === 'expired' ? (
+                                            <div className="w-full h-[40vh] flex items-center justify-center text-center text-gray-500 p-4">QRIS kedaluwarsa. Kembali untuk membuat transaksi baru.</div>
+                                        ) : qrisUrl ? (
                                             <img
                                               key={qrisUrl}
                                               src={qrisUrl}
@@ -4037,7 +4050,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                     </div>
                                 </div>
                                 
-                                {paymentMethod === 'gopay_merchant_polling' ? (
+                                {['duitku_qris', 'gopay_merchant_polling'].includes(paymentMethod) ? (
                                   <div className="mt-4 md:mt-6 w-full rounded-xl border border-white/20 bg-white/10 p-4 text-center text-white">
                                     <div className="flex items-center justify-center gap-2 font-bold">
                                       {paymentPollingState === 'expired' ? (
@@ -4060,10 +4073,18 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                           ? 'Silakan kembali dan mulai sesi baru.'
                                           : paymentPollingState === 'retrying'
                                             ? 'Koneksi ke server terputus sementara. Pemeriksaan akan dicoba lagi otomatis.'
-                                            : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
+                                            : paymentMethod === 'duitku_qris'
+                                              ? 'Scan QRIS ini untuk membayar. Sesi lanjut otomatis setelah pembayaran dikonfirmasi.'
+                                              : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
                                     </p>
                                     {flowError && <p className="mt-2 text-sm font-semibold text-amber-300">{flowError}</p>}
-                                    {paymentPollingState !== 'expired' && (
+                                    {paymentMethod === 'duitku_qris' && (
+                                      <p className="mt-2 text-xs text-white/75">
+                                        {paymentEnvironment === 'sandbox' && <strong className="block text-amber-300">Mode uji — pembayaran sandbox</strong>}
+                                        {paymentExpiresAt && <>Berlaku sampai {new Date(paymentExpiresAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
+                                      </p>
+                                    )}
+                                    {paymentMethod !== 'duitku_qris' && paymentPollingState !== 'expired' && (
                                       <button onClick={handlePaymentConfirm} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-white/80 underline underline-offset-2 hover:text-white">
                                         Periksa lewat kamera
                                       </button>
@@ -4310,14 +4331,14 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                         return (
                           <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none overflow-hidden">
                             <div 
-                              className="border-2 border-white/50 border-dashed rounded-lg transition-all duration-500 relative"
+                              className="border-2 border-white/50 border-dashed rounded-lg transition-all duration-500 relative portrait:!shadow-none"
                               style={{ 
                                 aspectRatio: `${slot.width} / ${slot.height}`,
                                 height: isPortrait ? '100%' : 'auto',
                                 width: isPortrait ? 'auto' : '100%',
                                 maxWidth: '100%',
                                 maxHeight: '100%',
-                                boxShadow: '0 0 0 9999px rgba(0,0,0,0.65)'
+                                boxShadow: isVertical ? undefined : '0 0 0 9999px rgba(0,0,0,0.65)'
                               }}
                             >
                                 <div className="absolute inset-0 flex items-center justify-center">
