@@ -34,14 +34,13 @@ test('Print camera and shutter center-cover the full processing canvas once with
   const source = {width: 1920, height: 1080};
   const slot = {width: 555, height: 555};
   geometry.paintPrintCameraCrop(ctx, source, slot);
-  assert.deepEqual(calls, [['save'], ['translate', 555, 0], ['scale', -1, 1],
-    ['drawImage', source, 420, 0, 1080, 1080, 0, 0, 555, 555], ['restore']]);
+  assert.deepEqual(calls, [['save'], ['drawImage', source, 420, 0, 1080, 1080, 0, 0, 555, 555], ['restore']]);
   calls.length = 0;
   geometry.paintPrintCameraCrop(ctx, {width: 1080, height: 1920}, slot);
-  assert.deepEqual(calls[3].slice(2), [0, 420, 1080, 1080, 0, 0, 555, 555]);
+  assert.deepEqual(calls[1].slice(2), [0, 420, 1080, 1080, 0, 0, 555, 555]);
   calls.length = 0;
   geometry.paintPrintCameraCrop(ctx, {width: 555, height: 555}, slot);
-  assert.deepEqual(calls[3].slice(2), [0, 0, 555, 555, 0, 0, 555, 555]);
+  assert.deepEqual(calls[1].slice(2), [0, 0, 555, 555, 0, 0, 555, 555]);
 });
 
 test('prepared mono photo cannot leak across source, settings or geometry revisions', () => {

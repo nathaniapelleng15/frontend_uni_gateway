@@ -1264,8 +1264,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         // terlihat, karena label akan keluar tanpa kotak cetak (margin 0) dan
         // penyebabnya bukan di layar kiosk.
         console.warn(
-          'Konfigurasi cetak dari server belum pernah terbaca. Cetak memakai '
-          + 'bawaan aplikasi — ukuran/margin dari Admin TIDAK berlaku. '
+          'Konfigurasi cetak dari server belum pernah terbaca. Cetak NIIMBOT '
+          + 'ditunda agar ukuran/margin yang salah tidak dipakai. '
           + 'Periksa kunci API kiosk dan alamat backend.',
         );
         return;
@@ -2146,7 +2146,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     if (canvas.width !== video.videoWidth) { canvas.width = video.videoWidth; canvas.height = video.videoHeight; }
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.translate(canvas.width, 0); ctx.scale(-1, 1);
+    if (loopStateRef.current.step === 'CAPTURE') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     
     const { isCalibrating: currentIsCalibrating, calibrationBox: currentBox } = loopStateRef.current;
@@ -2169,9 +2172,10 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     if (canvas.width !== results.image.width) { canvas.width = results.image.width; canvas.height = results.image.height; }
     ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Keep the same source orientation as drawVideoDirectly.
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
+    if (loopStateRef.current.step === 'CAPTURE') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(results.segmentationMask, 0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'source-in';
     ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
@@ -2825,9 +2829,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     if (shutterAudioRef.current) { shutterAudioRef.current.currentTime = 0; shutterAudioRef.current.play().catch(e=>{}); }
     setTimeout(() => setFlash(false), 350);
     const canvas = processingCanvasRef.current;
-    // Canvas preview disimpan dalam orientasi mirror untuk selfie preview.
-    // Balik sekali lagi ke canvas baru saat menyimpan foto agar file hasilnya
-    // natural (tidak mirror), tanpa mengubah tampilan live.
+    // Simpan orientasi yang sama seperti preview kamera saat berpose.
     const photoCanvas = document.createElement('canvas');
     if (selectedPackage === 'print' && !printPhotoLayoutRef.current) {
       printPhotoLayoutRef.current = getCaptureLayoutConfig(selectedFrame, selectedLayoutId);
@@ -2842,8 +2844,6 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       paintPrintCameraCrop(photoCtx, canvas, printSlot);
     } else {
       // Digital intentionally keeps the full processing canvas and orientation.
-      photoCtx.translate(photoCanvas.width, 0);
-      photoCtx.scale(-1, 1);
       photoCtx.drawImage(canvas, 0, 0);
     }
     const photo = photoCanvas.toDataURL('image/jpeg', 0.95);
@@ -3635,7 +3635,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const renderCameraLivePreview = () => selectedPackage === 'print' ? <>
     <canvas ref={processingCanvasRef} className="hidden" aria-hidden="true" />
     <PrintCameraPreview sourceRef={processingCanvasRef} slot={printPresentationConfig.slots[0]} fillPortrait={isVertical} />
-  </> : <canvas id="camera-preview" ref={processingCanvasRef} className={`w-full h-full transform scale-x-[-1] ${isVertical ? 'object-cover' : 'object-contain portrait:object-cover'}`} />;
+  </> : <canvas id="camera-preview" ref={processingCanvasRef} className={`w-full h-full ${isVertical ? 'object-cover' : 'object-contain portrait:object-cover'}`} />;
 
   const renderCandidatePreview = (index: number, review = false) => review
     ? <ReviewPhotoPreview index={index} />
@@ -3844,7 +3844,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                   <button id="btn-close-calibration" onClick={() => setIsCalibrating(false)} className="p-2 bg-white/10 hover:bg-white/20 rounded-full"><X size={32} /></button>
               </div>
               <div className="flex-1 relative border-4 border-white/20 rounded-3xl overflow-hidden bg-black pointer-events-none">
-                   <canvas id="calibration-canvas" ref={processingCanvasRef} className="w-full h-full object-contain transform scale-x-[-1]" />
+                           <canvas id="calibration-canvas" ref={processingCanvasRef} className="w-full h-full object-contain" />
                    <div className="absolute top-4 left-4 bg-black/60 p-4 rounded-xl text-white max-w-sm pointer-events-none">
                        <p className="text-lg font-semibold text-green-400 mb-2">Instructions:</p>
                        <ul className="list-disc pl-5 space-y-2 text-sm opacity-90">
@@ -4136,7 +4136,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 className={`w-[300px] sm:w-[330px] md:w-[350px] max-h-[52vh] bg-black/60 border-2 rounded-[2.2rem] relative overflow-hidden shadow-[0_15px_35px_rgba(0,0,0,0.6)] flex items-center justify-center transition-colors duration-300 ${scanFrozen ? 'border-emerald-400/80' : 'border-white/20'}`}
                 style={{ aspectRatio: `${SCAN_GUIDE.widthRatio} / ${SCAN_GUIDE.heightRatio}` }}
               >
-                <canvas ref={processingCanvasRef} className="w-full h-full object-cover transform scale-x-[-1]" />
+                <canvas ref={processingCanvasRef} className="w-full h-full object-cover" />
                 
                 {/* Bingkai panduan: ukurannya dihitung dari SCAN_GUIDE yang sama
                     dengan area foto, jadi keduanya tidak mungkin lagi berbeda.

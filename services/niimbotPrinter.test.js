@@ -269,8 +269,8 @@ test('customize grayscale photo stays smooth while physical printing keeps one-b
     'physical print must remain monochrome by default');
   assert.match(SERVICE, /if \(mode === 'monochrome'\) \{[\s\S]*?ditherToBlackAndWhite\([\s\S]*?ctx\.putImageData\(imageData, 0, 0\);[\s\S]*?\n    \}/,
     'only monochrome/thermal output may dither its pixels');
-  assert.match(PHOTO_PREVIEW, /grayscaleContext\.filter = 'grayscale\(100%\)'/,
-    'the display-only photo is converted to continuous grayscale');
+  assert.match(PHOTO_PREVIEW, /grayscaleContext\.filter = `brightness\(\$\{brightness\}%\) contrast\(\$\{contrast\}%\) saturate\(\$\{saturation\}%\) grayscale\(100%\)`/,
+    'the display-only photo uses the printer brightness, contrast and saturation before grayscale');
   assert.match(PHOTO_PREVIEW, /grayscaleContext\.drawImage\(crop, 0, 0\);[\s\S]*?return grayscale;/,
     'the display-only renderer keeps exactly the same photo pixels without thermal overscan or dithering');
   assert.equal((PHOTO_PREVIEW.match(/\.prepareCanvas\(/g) || []).length, 1,

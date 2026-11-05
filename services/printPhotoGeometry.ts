@@ -62,8 +62,6 @@ export function paintPrintCameraCrop(
   if (sw / sh > ratio) { sw = sh * ratio; sx = (source.width - sw) / 2; }
   else { sh = sw / ratio; sy = (source.height - sh) / 2; }
   ctx.save();
-  ctx.translate(slot.width, 0);
-  ctx.scale(-1, 1);
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, slot.width, slot.height);
   ctx.restore();
 }

@@ -42,19 +42,27 @@ test('flash putih saat jepret benar-benar penuh dan tidak teredupkan transisi la
   assert.match(source, /\$\{flash \? 'opacity-100' : 'opacity-0'\}/);
 });
 
-test('hasil jepretan disimpan tanpa mirror dan memakai seluruh frame kamera', () => {
+test('hasil jepretan mengikuti orientasi preview dan memakai seluruh frame kamera', () => {
   assert.match(source, /photoCanvas\.getContext\('2d'\)/);
-  assert.match(source, /photoCtx\.translate\(photoCanvas\.width, 0\)/);
-  assert.match(source, /photoCtx\.scale\(-1, 1\)/);
+  assert.doesNotMatch(source, /photoCtx\.(?:translate|scale)\(/);
   assert.match(source, /photoCtx\.drawImage\(canvas, 0, 0\)/);
   assert.ok(source.includes("photoCanvas.toDataURL('image/jpeg', 0.95)"));
+});
+
+test('kamera dan segmentasi hanya mirror saat sesi foto, bukan saat scan pembayaran', () => {
+  const direct = source.slice(source.indexOf('const drawVideoDirectly ='), source.indexOf('const onSegmentationResults ='));
+  const segmented = source.slice(source.indexOf('const onSegmentationResults ='), source.indexOf('const loadBgImage ='));
+  for (const render of [direct, segmented]) {
+    assert.match(render, /ctx\.drawImage\(/);
+    assert.match(render, /if \(loopStateRef\.current\.step === 'CAPTURE'\)\s*\{\s*ctx\.translate\(canvas\.width, 0\);\s*ctx\.scale\(-1, 1\);\s*\}/);
+  }
 });
 
 test('preview Digital tetap kanvas langsung; Print hanya memotong canvas tampilan terpisah', () => {
   assert.match(source, /: <canvas id="camera-preview" ref=\{processingCanvasRef\}/);
   assert.match(source, /<PrintCameraPreview sourceRef=\{processingCanvasRef\}/);
   assert.match(source, /<canvas ref=\{processingCanvasRef\} className="hidden"/);
-  assert.match(source, /w-full h-full object-contain transform scale-x-\[-1\]/);
+  assert.doesNotMatch(source, /scale-x-\[-1\]/);
   assert.ok(!source.includes('NiimbotPhotoPreview id="camera-preview"'), 'stream langsung tidak boleh diproses ulang menjadi preview Niimbot');
 });
 

@@ -130,10 +130,9 @@ export function labelMmFromPaperSize(paperSize: string | null | undefined): { wi
  * boleh diisi tinta. Kalau foto diisi ke seluruh kertas, gambar menimpa bingkai
  * dan nomor frame — hasilnya terlihat "tidak sesuai" walau printernya benar.
  *
- * Target 555 x 567 px (46,99 x 48,01 mm), x=0 y=59.
- * Dari acuan Y=35, turun 0,2 cm: round(2 / 25,4 * 300) = 24 px.
- * Margin kiri/atas/kanan/bawah 0/59/83/165; kanvas tetap 638 x 791:
- *   0 + 555 + 83 = 638; 59 + 567 + 165 = 791.
+ * Target 555 x 573 px (46,99 x 48,51 mm), x=0 y=70.
+ * Margin kiri/atas/kanan/bawah 0/70/83/148; kanvas tetap 638 x 791:
+ *   0 + 555 + 83 = 638; 70 + 573 + 148 = 791.
  * Mode cover menjaga rasio sumber; hasil fisik masih perlu diverifikasi.
  *
  * `fitMode: 'cover'` bukan pilihan gaya: bingkai yang sudah tercetak menuntut

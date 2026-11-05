@@ -72,11 +72,12 @@ export const KioskSettings: React.FC = () => {
       const info = await printer.pairNow();
       // Dua hasil berbeda, dan bedanya penting bagi operator: tersambung sekarang,
       // versus izinnya bertahan untuk seterusnya.
-      setPrinterMsg(info.pairingPersisted
-        ? `Printer siap: ${info.deviceName} (${info.model}). Cetak berikutnya tidak akan menampilkan dialog.`
-        : `Printer ${info.deviceName} tersambung, TETAPI browser tidak menyimpan izinnya untuk alamat ini. `
-          + 'Cetak berikutnya akan meminta izin lagi. Periksa: mode penyamaran/incognito, izin '
-          + 'Bluetooth situs ini, atau pengaturan "hapus data situs saat keluar".');
+      if (info.pairingPersisted) {
+        setPrinterMsg(`Printer siap: ${info.deviceName} (${info.model}). Cetak berikutnya tidak akan menampilkan dialog.`);
+      } else {
+        setPrinterErr(`Koneksi printer ${info.deviceName} terbentuk, tetapi izin tersimpan belum dapat dipastikan. `
+          + 'Periksa izin Bluetooth situs, lalu tekan Periksa ulang.');
+      }
       await refreshPrinterState();
     } catch (error: any) {
       const msg = String(error?.message || error);
@@ -450,6 +451,7 @@ export const KioskSettings: React.FC = () => {
               {pairing === 'checking' && 'Memeriksa izin Bluetooth untuk alamat ini...'}
               {pairing === 'pairing' && 'Menunggu pilihan printer...'}
               {pairing === 'unsupported' && 'Browser ini tidak mendukung Web Bluetooth.'}
+              {pairing === 'permission-unavailable' && 'Chrome belum menyediakan pemeriksaan izin Bluetooth tersimpan.'}
               {pairing === 'no-stored-device' && 'Belum ada printer diizinkan untuk alamat ini.'}
               {pairing === 'ready' && `Siap: ${printerNames.join(', ')}`}
             </span>

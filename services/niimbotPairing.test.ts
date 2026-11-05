@@ -67,6 +67,11 @@ test('belum ada printer tersimpan -> pairingState meminta dipasangkan', async ()
   assert.equal(await new NiimbotPrinter().pairingState(), 'no-stored-device');
 });
 
+test('browser tanpa getDevices menyatakan izin tidak dapat diperiksa', async () => {
+  Object.defineProperty(globalThis, 'navigator', { value: { bluetooth: { requestDevice: async () => {} } }, configurable: true });
+  assert.equal(await new NiimbotPrinter().pairingState(), 'permission-unavailable');
+});
+
 test('printer sudah tersimpan -> siap, tanpa dialog', async () => {
   const catatan = pasangBluetooth({ devices: [perangkat('B1pro-i616')] });
   const p = new NiimbotPrinter();
@@ -74,6 +79,17 @@ test('printer sudah tersimpan -> siap, tanpa dialog', async () => {
   assert.deepEqual(await p.storedDeviceNames(), ['B1pro-i616']);
   // Inti permintaannya: membaca izin tidak membuka pemilih.
   assert.equal(catatan.requestDevice, 0, 'membaca izin tidak boleh membuka pemilih');
+});
+
+test('nama dari event koneksi niimbluelib dipakai untuk laporan dan verifikasi izin', async () => {
+  const printer = new NiimbotPrinter() as any;
+  printer.client = { getPrinterInfo: () => ({}), getModelMetadata: () => ({}), getPrintTaskType: () => null };
+  let reported = '';
+  printer.reportStatus = async (_status: string, details: any) => { reported = details.printerName; };
+  const result = await printer.finishConnect({ deviceName: 'B1pro-i616' });
+  assert.equal(result.deviceName, 'B1pro-i616');
+  assert.equal(printer.printDeviceName, 'B1pro-i616');
+  assert.equal(reported, 'B1pro-i616');
 });
 
 test('getDevices gagal (izin dicabut) -> tetap tidak membuka pemilih', async () => {

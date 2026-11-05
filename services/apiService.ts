@@ -230,6 +230,12 @@ const request = async <T>(config: AxiosRequestConfig): Promise<AxiosResponse<T>>
 
 // ─── Connection ──────────────────────────────────────────────────────────────
 
+export const reportPrinterStatus = async (data: {
+  status: string; printer_name: string | null; paper_status: string | null; last_error: string | null;
+}): Promise<void> => {
+  await request({ method: 'POST', url: '/printer-status', data });
+};
+
 export const checkBackendConnection = async (): Promise<void> => {
   const response = await request<ApiResponse>({ method: 'GET', url: '/connection' });
   if (response.data.success === false) {
@@ -533,7 +539,8 @@ export const fetchPrintingConfig = async (): Promise<{
       params: { _t: Date.now() }
     });
     return response.data?.data || null;
-  } catch {
+  } catch (error) {
+    console.warn('[Printer] Konfigurasi server tidak dapat diambil:', error instanceof KioskApiError ? `HTTP ${error.status || 'tidak tersedia'}` : 'koneksi gagal');
     // Jaringan mati / kiosk belum terdaftar.
     //
     // Dulu di sini mengembalikan null dan pemanggil kembali ke BAWAAN SENDIRI

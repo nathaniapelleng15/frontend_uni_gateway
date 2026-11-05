@@ -77,7 +77,7 @@ type JenisKertas = Awaited<ReturnType<NiimbotAbstractClient['protocol']['getPape
  *                     dicabut. Pemilih memang perlu dibuka SEKALI.
  *  'ready'            Ada printer tersimpan. Sambungan berikutnya tanpa dialog.
  */
-export type PrinterPairingState = 'unsupported' | 'no-stored-device' | 'ready';
+export type PrinterPairingState = 'unsupported' | 'permission-unavailable' | 'no-stored-device' | 'ready';
 
 /**
  * Pesan standar saat printer belum dipasangkan di browser ini.
@@ -310,14 +310,14 @@ export class NiimbotPrinter {
       for (let coba = 1; coba <= JUMLAH_PERCOBAAN; coba += 1) {
         try {
           await btClient.connect({ authorizedDevice: found.device });
-          return this.finishConnect();
+          return this.finishConnect(found.device);
         } catch (error) {
           galatTerakhir = error;
           // `usesTillItsAvailable` menyerahkan penungguan ke library dan
           // menangani printer yang menyala terlambat.
           try {
             await btClient.connect({ authorizedDevice: found.device, usesTillItsAvailable: true });
-            return this.finishConnect();
+            return this.finishConnect(found.device);
           } catch (error2) {
             galatTerakhir = error2;
           }
@@ -499,6 +499,7 @@ export class NiimbotPrinter {
 
   private async pairingStateWeb(): Promise<PrinterPairingState> {
     if (!NiimbotPrinter.isSupported()) return 'unsupported';
+    if (typeof (navigator as any).bluetooth?.getDevices !== 'function') return 'permission-unavailable';
     const devices = await this.storedDevices();
     if (devices.length === 0) return 'no-stored-device';
     return 'ready';
@@ -730,6 +731,8 @@ export class NiimbotPrinter {
     // sering kosong — printer mengirim nomor seri, bukan nama.
     const namaBrowser = typeof perangkatDipilih?.name === 'string' && perangkatDipilih.name
       ? perangkatDipilih.name
+      : typeof perangkatDipilih?.deviceName === 'string' && perangkatDipilih.deviceName
+      ? perangkatDipilih.deviceName
       : null;
     const namaProtokol = (info as { deviceName?: string } | undefined)?.deviceName || null;
     const deviceName = namaBrowser || namaProtokol || 'tidak diketahui';
@@ -770,10 +773,6 @@ export class NiimbotPrinter {
     status: 'READY' | 'OFFLINE' | 'ERROR' | 'UNKNOWN',
     details: { printerName?: string; paperStatus?: string; lastError?: string } = {},
   ): Promise<void> {
-    const apiKey = readKioskApiKey();
-    const baseUrl = readApiBaseUrl();
-    if (!apiKey || !baseUrl) return;
-
     // NAMA PRINTER TIDAK BOLEH HILANG SAAT GALAT.
     //
     // Laporan galat datang dari jalur cetak, yang tidak selalu membawa nama
@@ -784,18 +783,15 @@ export class NiimbotPrinter {
     const nama = details.printerName || this.printDeviceName || this.rememberedDeviceName() || null;
 
     try {
-      await fetch(`${baseUrl.replace(/\/$/, '')}/kiosk/printer-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
-        body: JSON.stringify({
+      const { reportPrinterStatus } = await import('./apiService');
+      await reportPrinterStatus({
           status,
           printer_name: nama,
           paper_status: details.paperStatus ?? null,
           last_error: details.lastError ?? null,
-        }),
       });
     } catch {
-      // Sengaja ditelan: lihat catatan di atas.
+      console.warn('[Printer] Status tidak dapat dikirim ke backend.');
     }
   }
 
@@ -1054,30 +1050,4 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.onerror = () => reject(new Error('Gambar tidak bisa dimuat.'));
     img.src = src;
   });
-}
-
-
-/**
- * Kunci API kiosk.
- *
- * Dibaca dari localStorage dengan kunci yang sama dipakai `storageService`, lalu
- * dari env build. Kalau tidak ada, pelaporan status dilewati — lebih baik tidak
- * ada status di Admin daripada mencetak dengan kredensial salah.
- */
-function readKioskApiKey(): string {
-  try {
-    const direct = localStorage.getItem('unismiles_kiosk_api_key');
-    if (direct) return direct.trim();
-    const cfg = localStorage.getItem('unismiles_config');
-    if (cfg) {
-      const parsed = JSON.parse(cfg);
-      if (parsed?.apiKey) return String(parsed.apiKey).trim();
-    }
-  } catch { /* localStorage bisa diblokir; perlakukan sebagai tidak ada */ }
-  return String(import.meta.env.VITE_KIOSK_API_KEY || '').trim();
-}
-
-/** Base URL API backend. */
-function readApiBaseUrl(): string {
-  return String(import.meta.env.VITE_API_BASE_URL || '').trim();
 }

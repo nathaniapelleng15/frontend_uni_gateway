@@ -38,7 +38,8 @@ export async function prepareNiimbotPhotoPreview(
   grayscale.height = crop.height;
   const grayscaleContext = grayscale.getContext('2d');
   if (!grayscaleContext) throw new Error('Canvas grayscale preview tidak tersedia.');
-  grayscaleContext.filter = 'grayscale(100%)';
+  const { brightness, contrast, saturation } = settings.adjustments;
+  grayscaleContext.filter = `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) grayscale(100%)`;
   grayscaleContext.drawImage(crop, 0, 0);
 
   // Exact display crop: the printer renderer deliberately overscans its ink
@@ -55,8 +56,6 @@ export function snapshotNiimbotCamera(source: HTMLCanvasElement): string {
   copy.height = source.height;
   const ctx = copy.getContext('2d');
   if (!ctx) throw new Error('Canvas kamera tidak tersedia.');
-  ctx.translate(copy.width, 0);
-  ctx.scale(-1, 1);
   ctx.drawImage(source, 0, 0);
   return copy.toDataURL('image/jpeg', 0.95);
 }
