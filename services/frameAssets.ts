@@ -1,5 +1,14 @@
 type FramePayload = Record<string, any> | null | undefined;
 
+/** Keep the same URL between catalog refreshes, but refresh it when Admin edits the frame. */
+export const versionFrameAsset = (url: string | undefined, version: unknown): string | undefined => {
+  if (!url || /^(?:data:|blob:)/i.test(url) || version == null || version === '') return url;
+  const hashIndex = url.indexOf('#');
+  const base = hashIndex < 0 ? url : url.slice(0, hashIndex);
+  const hash = hashIndex < 0 ? '' : url.slice(hashIndex);
+  return `${base}${base.includes('?') ? '&' : '?'}v=${encodeURIComponent(String(version))}${hash}`;
+};
+
 const assetRoot = (apiBaseUrl: string): string => String(apiBaseUrl || '')
   .trim()
   .replace(/\/api\/v1(?:\/kiosk)?$/i, '')

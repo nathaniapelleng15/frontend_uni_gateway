@@ -20,7 +20,7 @@ function stateScope(extra = {}) {
   function visit(n) { if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text.startsWith('set')) scope[n.expression.text] = value => { state[n.expression.text] = typeof value === 'function' ? value(state[n.expression.text]) : value; }; ts.forEachChild(n, visit); }
   visit(ast); return scope;
 }
-test('layout policy allows exactly one Print strip and one/two/three Digital slots before creating a paid session', async () => {
+test('layout policy allows one Print strip and up to four Digital slots before creating a paid session', async () => {
   const getEffectiveLayoutConfig = (style, id) => ({slots: Array(style?.count ?? Number(id[0])).fill({})});
   const frames = ['1x1','2x1','3x1','4x1'].map(id => ({id, enabled:true, styles:[{id:1}]}));
   for (const pkg of ['print','digital']) {
@@ -29,10 +29,12 @@ test('layout policy allows exactly one Print strip and one/two/three Digital slo
     assert.equal(eligible('1x1'), true);
     assert.equal(eligible('2x1'), pkg === 'digital');
     assert.equal(eligible('3x1'), pkg === 'digital');
-    assert.equal(eligible('4x1'), false);
-    scope.isWorkflowLayoutAllowed = eligible;
-    await handler('handleLayoutSelect', scope)('4x1');
-    assert.equal(scope.state.setSelectedLayoutId, undefined, 'invalid layout must not create session or touch payment');
+    assert.equal(eligible('4x1'), pkg === 'digital');
+    if (pkg === 'print') {
+      scope.isWorkflowLayoutAllowed = eligible;
+      await handler('handleLayoutSelect', scope)('4x1');
+      assert.equal(scope.state.setSelectedLayoutId, undefined, 'invalid layout must not create session or touch payment');
+    }
     scope.allowedLayouts = ['2x1'];
     assert.equal(eligible('1x1'), false);
     scope.allowedLayouts = [];
@@ -43,7 +45,7 @@ test('layout policy allows exactly one Print strip and one/two/three Digital slo
 });
 
 test('selection requires exactly one photo per strip before Edit and Result, keeping candidates separate', () => {
-  for (const count of [1,2,3]) {
+  for (const count of [1,2,3,4]) {
     const candidates = Array.from({length:count*2},(_,i)=>`candidate-${i}`);
     const scope = stateScope({step:'PRINT_SELECTION', selectedPackage:count===1?'print':'digital', outputCount:count,
       candidateCount:count*2, capturedPhotos:candidates, selectedPrintPhotoIndex:1, selectedPhotoIndices:[], printActionInFlightRef:{current:false},
@@ -61,6 +63,12 @@ test('selection requires exactly one photo per strip before Edit and Result, kee
     scope.printSelectionConfirmed=false; scope.state.setStep=undefined;
     handler('handleFinish',scope)(); assert.equal(scope.state.setStep,undefined,'cannot bypass confirmation');
   }
+});
+
+test('four-slot digital layout requires four outputs and eight candidates', () => {
+  assert.equal(handler('outputCount', {selectedPackage:'digital', selectedLayoutId:'4x1'}), 4);
+  assert.equal(handler('candidateCount', {outputCount:4}), 8);
+  assert.equal(handler('outputCount', {selectedPackage:'print', selectedLayoutId:'4x1'}), 1);
 });
 
 test('composite uses selected outputs while the download gallery receives every captured candidate', async () => {
@@ -322,8 +330,8 @@ test('expired review cannot start another capture but can confirm the last shot 
   accept();assert.equal(scope.state.setStep,'PRINT_SELECTION');assert.equal(scope.state.setReviewPhotoIndex,null);
 });
 
-test('each of 2/4/6 captures pauses for review and only Continue advances to the next photo or final selection', () => {
-  for (const count of [1, 2, 3]) {
+test('each of 2/4/6/8 captures pauses for review and only Continue advances to the next photo or final selection', () => {
+  for (const count of [1, 2, 3, 4]) {
     const scope = stateScope({step:'CAPTURE',reviewPhotoIndex:null,captureExpired:false,capturedPhotos:[],candidateCount:count * 2,captureDeadline:null,retakeIndex:null,
       processingCanvasRef:{current:{width:640,height:480}},shutterAudioRef:{current:null},Date,
       selectedPackage:'digital',printPresentationKey:'digital-fixture',

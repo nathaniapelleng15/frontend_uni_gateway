@@ -1,13 +1,23 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { frameCacheStorageKey, resolveFrameArtworkUrl, shouldRefreshFrameCatalog } from './frameAssets.ts';
+import { frameCacheStorageKey, resolveFrameArtworkUrl, shouldRefreshFrameCatalog, versionFrameAsset } from './frameAssets.ts';
 
 test('Photobooth routes resolved Admin artwork into the shared frame image layer', () => {
   const source = readFileSync(new URL('../components/PhotoBooth.tsx', import.meta.url), 'utf8');
-  assert.match(source, /resolveFrameArtworkUrl\(style, canonical, getApiConfig\(\)\.baseUrl\)/);
-  assert.match(source, /overlayUrl:\s*bustFrameAssetCache\(artworkUrl\)/);
+  assert.match(source, /versionFrameAsset\(resolveFrameArtworkUrl\(style, canonical, getApiConfig\(\)\.baseUrl\), style\?\.updated_at\)/);
+  assert.match(source, /overlayUrl:\s*artworkUrl/);
   assert.match(source, /src=\{frameToRender\.overlayUrl\}/);
+});
+
+test('frame URLs stay stable across refreshes and change when the frame is updated', () => {
+  const url = 'https://api.example.test/frame.png?size=small#preview';
+  assert.equal(versionFrameAsset(url, '2026-11-09 10:00:00'), 'https://api.example.test/frame.png?size=small&v=2026-11-09%2010%3A00%3A00#preview');
+  assert.equal(versionFrameAsset(url, '1'), versionFrameAsset(url, '1'));
+  assert.notEqual(versionFrameAsset(url, '1'), versionFrameAsset(url, '2'));
+  assert.equal(versionFrameAsset(url, undefined), url);
+  assert.equal(versionFrameAsset('data:image/png;base64,abc', '1'), 'data:image/png;base64,abc');
+  assert.equal(versionFrameAsset('blob:preview', '1'), 'blob:preview');
 });
 
 test('resolves Admin Set BG overlayUrl for the kiosk preview', () => {

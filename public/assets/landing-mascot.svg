@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ilustrasi maskot kamera instan tersenyum sambil berpose peace dan mencetak foto" width="840" height="800" viewBox="0 0 820 780" style="display: block">
+      <defs>
+        <polygon id="pbStar" points="0,-50 12.9,-17.8 47.6,-15.5 20.9,6.8 29.4,40.5 0,22 -29.4,40.5 -20.9,6.8 -47.6,-15.5 -12.9,-17.8"></polygon>
+        <path id="pbSpark" d="M0 -30 Q4 -4 30 0 Q4 4 0 30 Q-4 4 -30 0 Q-4 -4 0 -30Z"></path>
+      </defs>
+      <!-- blob backdrop -->
+      <path d="M410 40 C560 20 740 90 780 250 C820 400 760 560 640 650 C520 740 330 760 200 690 C70 620 20 470 50 320 C80 170 260 60 410 40Z" fill="#FF6B35" stroke="#1A0A3D" stroke-width="10"></path>
+      <path d="M120 250 q30 -30 60 0 t60 0" fill="none" stroke="#FF9A6B" stroke-width="12" stroke-linecap="round"></path>
+      <path d="M600 660 q30 -30 60 0 t60 0" fill="none" stroke="#FF9A6B" stroke-width="12" stroke-linecap="round"></path>
+      <circle cx="690" cy="200" r="16" fill="#FF9A6B"></circle>
+      <circle cx="150" cy="560" r="12" fill="#FF9A6B"></circle>
+      <circle cx="120" cy="600" r="7" fill="#FF9A6B"></circle>
+
+      <!-- shadow -->
+      <ellipse cx="410" cy="712" rx="210" ry="24" fill="#1A0A3D" opacity="0.28"></ellipse>
+
+      <!-- legs -->
+      <rect x="325" y="590" width="32" height="90" rx="16" fill="#1A0A3D"></rect>
+      <rect x="463" y="590" width="32" height="90" rx="16" fill="#1A0A3D"></rect>
+      <ellipse cx="335" cy="690" rx="46" ry="22" fill="#D93A3A" stroke="#1A0A3D" stroke-width="8"></ellipse>
+      <ellipse cx="487" cy="690" rx="46" ry="22" fill="#D93A3A" stroke="#1A0A3D" stroke-width="8"></ellipse>
+
+      <!-- arms -->
+      <path d="M205 440 C140 440 100 400 98 335" fill="none" stroke="#1A0A3D" stroke-width="24" stroke-linecap="round"></path>
+      <path d="M615 450 C690 450 725 485 735 535" fill="none" stroke="#1A0A3D" stroke-width="24" stroke-linecap="round"></path>
+      <!-- peace hand -->
+      <rect x="66" y="232" width="24" height="70" rx="12" fill="#FFF4DC" stroke="#1A0A3D" stroke-width="8" transform="rotate(-16 78 290)"></rect>
+      <rect x="102" y="228" width="24" height="70" rx="12" fill="#FFF4DC" stroke="#1A0A3D" stroke-width="8" transform="rotate(14 114 290)"></rect>
+      <circle cx="98" cy="318" r="36" fill="#FFF4DC" stroke="#1A0A3D" stroke-width="9"></circle>
+      <!-- right hand -->
+      <circle cx="738" cy="548" r="36" fill="#FFF4DC" stroke="#1A0A3D" stroke-width="9"></circle>
+
+      <!-- top parts -->
+      <rect x="245" y="205" width="190" height="100" rx="30" fill="#D93A3A" stroke="#1A0A3D" stroke-width="10"></rect>
+      <rect x="278" y="228" width="84" height="42" rx="12" fill="#FFE34D" stroke="#1A0A3D" stroke-width="8"></rect>
+      <path d="M292 240 l18 0" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round"></path>
+      <rect x="500" y="228" width="76" height="60" rx="18" fill="#8FB5EE" stroke="#1A0A3D" stroke-width="10"></rect>
+
+      <!-- body -->
+      <rect x="190" y="270" width="440" height="340" rx="60" fill="#FFF4DC" stroke="#1A0A3D" stroke-width="12"></rect>
+      <rect x="196" y="498" width="428" height="52" fill="#4F0BB5"></rect>
+      <path d="M196 498 h428 M196 550 h428" stroke="#1A0A3D" stroke-width="8"></path>
+      <circle cx="245" cy="325" r="15" fill="#D93A3A" stroke="#1A0A3D" stroke-width="7"></circle>
+      <rect x="540" y="306" width="54" height="38" rx="10" fill="#1A0A3D"></rect>
+      <rect x="550" y="314" width="14" height="10" rx="4" fill="#8FB5EE"></rect>
+      <path d="M555 520 h44 M555 532 h30" stroke="#C3F56C" stroke-width="6" stroke-linecap="round"></path>
+
+      <!-- lens / face -->
+      <circle cx="410" cy="400" r="128" fill="#8FB5EE" stroke="#1A0A3D" stroke-width="12"></circle>
+      <path d="M318 350 A105 105 0 0 1 380 296" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" opacity="0.85"></path>
+      <circle cx="410" cy="405" r="95" fill="#C3F56C" stroke="#1A0A3D" stroke-width="10"></circle>
+      <ellipse cx="376" cy="385" rx="13" ry="20" fill="#1A0A3D"></ellipse>
+      <circle cx="380" cy="377" r="4.5" fill="#FFFFFF"></circle>
+      <path d="M428 390 q16 -18 32 0" fill="none" stroke="#1A0A3D" stroke-width="9" stroke-linecap="round"></path>
+      <circle cx="350" cy="425" r="12" fill="#FF8FB1"></circle>
+      <circle cx="470" cy="425" r="12" fill="#FF8FB1"></circle>
+      <path d="M375 422 q35 48 72 0 z" fill="#1A0A3D" stroke="#1A0A3D" stroke-width="6" stroke-linejoin="round"></path>
+      <path d="M396 444 q15 16 30 0" fill="#D93A3A"></path>
+
+      <!-- slot + printed photo -->
+      <rect x="292" y="566" width="236" height="22" rx="11" fill="#1A0A3D"></rect>
+      <g transform="rotate(-5 410 650)">
+        <rect x="322" y="578" width="176" height="150" rx="6" fill="#FFFFFF" stroke="#1A0A3D" stroke-width="9"></rect>
+        <rect x="338" y="594" width="144" height="94" rx="4" fill="#4F0BB5"></rect>
+        <circle cx="395" cy="636" r="6" fill="#FFE34D"></circle>
+        <circle cx="425" cy="636" r="6" fill="#FFE34D"></circle>
+        <path d="M388 654 q22 20 44 0" fill="none" stroke="#FFE34D" stroke-width="6" stroke-linecap="round"></path>
+      </g>
+
+      <!-- stars & sparkles -->
+      <use href="#pbStar" transform="translate(640 140) rotate(12) scale(1.1)" fill="#FFE34D" stroke="#1A0A3D" stroke-width="7" stroke-linejoin="round"></use>
+      <use href="#pbStar" transform="translate(110 470) rotate(-18) scale(0.7)" fill="#FFE34D" stroke="#1A0A3D" stroke-width="9" stroke-linejoin="round"></use>
+      <use href="#pbStar" transform="translate(720 640) rotate(20) scale(0.85)" fill="#C3F56C" stroke="#1A0A3D" stroke-width="8" stroke-linejoin="round"></use>
+      <use href="#pbSpark" transform="translate(220 140)" fill="#FFF4DC"></use>
+      <use href="#pbSpark" transform="translate(760 380) scale(0.7)" fill="#FFF4DC"></use>
+      <use href="#pbSpark" transform="translate(560 90) scale(0.55)" fill="#FFF4DC"></use>
+    </svg>

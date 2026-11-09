@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import './result-screen.css';
 import { 
   Settings, Camera, ChevronRight, Download, RefreshCw, 
   Check, Image as ImageIcon, ChevronLeft, SwitchCamera, Send, Mail, QrCode, Printer,
   Lock, Unlock, Scan, X, ChevronUp, ChevronDown, Loader2, Wand2, LayoutTemplate, AlertCircle, AlertTriangle
 } from 'lucide-react';
 import { FrameLayout, FrameStyle, PhotoFilter, GridLayoutId, VirtualBackground, FrameElement, STORAGE_KEYS } from '../types';
-import { frameCacheStorageKey, isSelectedFrameAvailable, resolveFrameArtworkUrl, shouldRefreshFrameCatalog, staleFrameSyncWarning } from '../services/frameAssets';
+import { frameCacheStorageKey, isSelectedFrameAvailable, resolveFrameArtworkUrl, shouldRefreshFrameCatalog, staleFrameSyncWarning, versionFrameAsset } from '../services/frameAssets';
 import { getStoredFilters, getLayoutConfig, getStoredBackgrounds, getAppConfig } from '../services/storageService';
 import { useAirGesture } from './useAirGesture';
 import { kioskAgentBridge } from '../services/kioskAgentBridge';
@@ -187,11 +188,6 @@ const normalizeFrameBackground = (style: any, config: any): any => {
 // Admin first stop at the same visual side (e.g. 88deg: cyan top, pink bottom).
 const adminAngleToCssAngle = (angle: number): number => 90 + angle;
 
-const bustFrameAssetCache = (url: string | undefined): string | undefined => {
-  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}v=${Date.now()}`;
-};
-
 // Admin versions use both `elements` and `assetElements` for artwork placed
 // on a frame. Kiosk rendering uses FrameElement, so normalize both payloads
 // into the same shape here instead of silently dropping uploaded logos.
@@ -242,7 +238,7 @@ const normalizeFrameElements = (style: any, config: any): FrameElement[] => {
       ...raw,
       id,
       type: isText ? 'text' : 'sticker',
-      content: isText ? String(raw?.content ?? raw?.text ?? '') : bustFrameAssetCache(resolveFrameAssetUrl(source)),
+      content: isText ? String(raw?.content ?? raw?.text ?? '') : versionFrameAsset(resolveFrameAssetUrl(source), style?.updated_at),
       x, y, width,
       height,
       rotation: Number(raw?.rotation ?? 0),
@@ -320,7 +316,7 @@ const normalizeTemplatePrices = (templates: any[]): FrameLayout[] => templates.m
           : null;
         const normalizedBackground = canonical ? normalizeFrameBackground(style, canonical) : null;
         const artworkUrl = canonical
-          ? resolveFrameArtworkUrl(style, canonical, getApiConfig().baseUrl)
+          ? versionFrameAsset(resolveFrameArtworkUrl(style, canonical, getApiConfig().baseUrl), style?.updated_at)
           : undefined;
         return canonical
           ? {
@@ -333,7 +329,7 @@ const normalizeTemplatePrices = (templates: any[]): FrameLayout[] => templates.m
               // Admin's "Set BG" may store artwork in overlayUrl, backgroundConfig,
               // or a legacy snake_case field. Normalize all of them to one URL
               // used by the thumbnail, live preview, and composite renderer.
-              overlayUrl: bustFrameAssetCache(artworkUrl),
+              overlayUrl: artworkUrl,
               slotBorder: style.slotBorder ?? style.slot_border ?? canonical.slotBorder ?? canonical.slot_border,
               slotBorderColor: style.slotBorderColor ?? style.slot_border_color ?? canonical.slotBorderColor ?? canonical.slot_border_color,
               slotBorderWidth: style.slotBorderWidth ?? style.slot_border_width ?? canonical.slotBorderWidth ?? canonical.slot_border_width
@@ -505,7 +501,7 @@ const BackButton: React.FC<{ onClick: () => void; uiMode: 'normal' | 'air-touch'
 
 interface BoothWrapperProps {
   children: React.ReactNode;
-  title?: string;
+  title?: React.ReactNode;
   subtitle?: string;
   onAdminClick?: () => void;
   hideAdmin?: boolean;
@@ -518,13 +514,16 @@ interface BoothWrapperProps {
   onBack?: () => void;
   hideLogos?: boolean;
   isVertical?: boolean;
+  playful?: boolean;
+  stripTicker?: boolean;
+  featureHeading?: boolean;
 }
 
-const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, showLockButton = true, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical }) => (
-  <div className={`h-full w-full ${customBg || 'bg-[#0c1633]'} text-white flex flex-col overflow-hidden select-none relative`}>
+const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, showLockButton = true, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical, playful, stripTicker, featureHeading }) => (
+  <div className={`${playful ? 'playful-booth' : ''} h-full w-full ${customBg || 'bg-[#0c1633]'} text-white flex flex-col overflow-hidden select-none relative`}>
       {/* Logos at Bottom Center for all wrapper screens */}
       {!hideLogos && (
-          <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 w-max flex items-center justify-center opacity-80 pointer-events-none z-40 ${isVertical ? 'gap-6 scale-75' : 'gap-10 md:gap-12 scale-90 md:scale-100'}`}>
+          <div className={`${playful ? 'playful-logos' : 'opacity-80'} ${stripTicker ? 'strip-footer-logos' : 'bottom-4'} absolute left-1/2 -translate-x-1/2 w-max flex items-center justify-center pointer-events-none z-40 ${isVertical ? 'gap-6 scale-75' : 'gap-10 md:gap-12 scale-90 md:scale-100'}`}>
               <img src="/assets/LOGO UNI INSIDE.png" alt="Uni Inside" className={`object-contain ${isVertical ? 'h-8' : 'h-12 md:h-16'}`} />
               <img src="/assets/LOGO KOLAB.png" alt="Kolab" className={`object-contain ${isVertical ? 'h-8' : 'h-12 md:h-16'}`} />
               <img src="/assets/LOGO UNI SMILE.png" alt="Uni Smile" className={`rounded-xl object-contain ${isVertical ? 'h-8' : 'h-12 md:h-16'}`} />
@@ -532,22 +531,22 @@ const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, 
       )}
 
       {!hideHeader && (
-        <div className={`px-6 w-full flex justify-center relative items-center bg-white/10 backdrop-blur-md border-b border-white/10 shrink-0 z-10 ${uiMode === 'air-touch' ? 'py-8' : isVertical ? 'py-3' : 'py-5'}`}>
+        <div className={`${playful ? 'playful-header' : 'bg-white/10 backdrop-blur-md border-b border-white/10'} ${stripTicker || featureHeading ? `strip-header ${isVertical && (!featureHeading || !hideAdmin) ? 'strip-header--vertical' : ''}` : ''} ${featureHeading ? (hideAdmin ? 'edit-heading' : 'result-heading') : ''} px-6 w-full flex justify-center relative items-center shrink-0 z-10 ${uiMode === 'air-touch' ? 'py-8' : isVertical ? 'py-3' : 'py-5'}`}>
             {/* Header actions are absolutely positioned so the title stays centered in the viewport. */}
             {onBack && (
-                <div className={`absolute left-3 top-1/2 -translate-y-1/2 z-20 ${isVertical ? '' : 'md:left-6'}`}>
+                <div className={`booth-header-back absolute left-3 top-1/2 -translate-y-1/2 z-20 ${isVertical ? '' : 'md:left-6'}`}>
                     <BackButton onClick={onBack} uiMode={uiMode} />
                 </div>
             )}
 
             {/* This remains in normal flow, independently centered from Back and settings actions. */}
-            <div className="max-w-[62vw] text-center pointer-events-none">
+            <div className="booth-header-title max-w-[62vw] text-center pointer-events-none">
                 {title && <h2 className={`font-display font-bold tracking-tight leading-none drop-shadow-lg ${uiMode === 'air-touch' ? 'text-4xl' : isVertical ? 'text-xl' : 'text-3xl md:text-4xl'}`}>{title}</h2>}
                 {subtitle && <p className={`text-white/90 mt-1 drop-shadow-md ${uiMode === 'air-touch' ? 'text-xl' : isVertical ? 'text-xs' : 'text-base md:text-lg'}`}>{subtitle}</p>}
             </div>
 
             {/* Absolute positioned right actions */}
-            <div className={`absolute right-4 top-1/2 -translate-y-1/2 flex z-20 ${uiMode === 'air-touch' ? 'gap-6' : 'gap-3'}`}>
+            <div className={`booth-header-actions absolute right-4 top-1/2 -translate-y-1/2 flex z-20 ${uiMode === 'air-touch' ? 'gap-6' : 'gap-3'}`}>
                 {onToggleLock && showLockButton && (
                 <button id="btn-toggle-cursor-lock" onClick={onToggleLock} className={`rounded-full transition-colors active:scale-95 border-2 ${uiMode === 'air-touch' ? 'p-6' : 'p-4'} ${isLocked ? 'bg-red-500/80 border-red-400' : 'bg-green-500/20 border-green-400/50 hover:bg-green-500/40'}`} style={{ display: uiMode === 'air-touch' ? 'block' : 'none' }}>
                     {isLocked ? <Lock size={uiMode === 'air-touch' ? 40 : 32} /> : <Unlock size={uiMode === 'air-touch' ? 40 : 32} />}
@@ -561,9 +560,10 @@ const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, 
             </div>
         </div>
       )}
-      <div className="flex-1 overflow-hidden relative flex flex-col">
+      <div className={`flex-1 overflow-hidden relative flex flex-col ${stripTicker ? 'strip-footer-space' : ''}`}>
           {children}
       </div>
+      {stripTicker && <div className="landing-ticker strip-ticker" aria-hidden="true"><div className="landing-ticker__track">{[0, 1].map(i => <span key={i} className="landing-ticker__copy">{'PILIH STRIP ✦ POSE ✦ CEKREK ✦ PRINT ✦ SAY CHEESE ✦ '.repeat(5)}</span>)}</div></div>}
   </div>
 );
 
@@ -866,7 +866,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   const [packageVisibilityRetry, setPackageVisibilityRetry] = useState(0);
   const [selectedLayoutId, setSelectedLayoutId] = useState<GridLayoutId | null>(null);
   const [capturedPhotos, setCapturedPhotos] = useState<string[]>([]);
-  const outputCount = selectedPackage === 'print' ? 1 : selectedLayoutId === '2x1' ? 2 : selectedLayoutId === '3x1' ? 3 : 1;
+  const outputCount = selectedPackage === 'print' ? 1 : selectedLayoutId === '4x1' ? 4 : selectedLayoutId === '3x1' ? 3 : selectedLayoutId === '2x1' ? 2 : 1;
   const candidateCount = outputCount * 2;
   const [selectedPhotoIndices, setSelectedPhotoIndices] = useState<number[]>([]);
   const [selectedOutputPhotos, setSelectedOutputPhotos] = useState<string[]>([]);
@@ -1326,7 +1326,6 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     return () => { cancelled = true; window.clearInterval(iv); };
   }, []);
   
-  const [customSubtitle, setCustomSubtitle] = useState('');
   const [customLogoUrl, setCustomLogoUrl] = useState('');
 
   // Camera & Capture
@@ -1668,7 +1667,6 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
     // Initial QRIS fetch (also re-fetched each time PAYMENT step opens)
     
     const appConfig = getAppConfig();
-    setCustomSubtitle(appConfig.customSubtitle || '');
     setCustomLogoUrl(appConfig.customLogoUrl || '');
     
     const mode = appConfig.uiMode || 'normal';
@@ -2260,7 +2258,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
   };
   // Layout slots are the customer-facing strip count, not the candidate count.
   const isWorkflowLayoutAllowed = (id: GridLayoutId): boolean => {
-    const count = id === '1x1' ? 1 : id === '2x1' ? 2 : id === '3x1' ? 3 : 0;
+    const count = id === '1x1' ? 1 : id === '2x1' ? 2 : id === '3x1' ? 3 : id === '4x1' ? 4 : 0;
     if (!selectedPackage || !count || (selectedPackage === 'print' && count !== 1)) return false;
     if (allowedLayouts?.length && !allowedLayouts.includes(id)) return false;
     const layout = frames.find(frame => frame.id === id && frame.enabled);
@@ -3138,17 +3136,8 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         try {
           const img = await loadImg(photo);
           ctx.save();
-          // Dua hal berbeda digabung di sini, dan keduanya harus berlaku:
-          //   1. Filter gaya pilihan pengguna (mis. "Vintage").
-          //   2. Penyesuaian tampilan dari halaman Pengaturan Admin.
-          // Dijumlahkan sebagai string `filter` CSS karena canvas hanya
-          // menerima satu nilai — menimpa salah satunya akan menghilangkan
-          // efek yang lain tanpa peringatan.
-          const adminAdjust = `brightness(${photoAdjust.brightness}%) contrast(${photoAdjust.contrast}%) saturate(${photoAdjust.saturation}%)`;
-          const userFilter = selectedFilter?.cssFilter && selectedFilter.cssFilter !== 'none'
-            ? selectedFilter.cssFilter
-            : '';
-          ctx.filter = [userFilter, adminAdjust].filter(Boolean).join(' ');
+          // Kalibrasi printer hanya berlaku pada cetakan fisik, bukan unduhan.
+          ctx.filter = selectedFilter?.cssFilter || 'none';
           ctx.beginPath();
           ctx.rect(slot.x, slot.y, slot.width, slot.height);
           ctx.clip();
@@ -3869,37 +3858,43 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
       {step === 'LANDING' && (
         <>
-          <div className="h-full w-full bg-[#0c1633] flex flex-col items-center justify-center relative overflow-hidden text-white p-4 select-none">
-            <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-                 <div className="absolute top-[10%] left-[10%] w-48 h-48 bg-orange-400/40 rounded-full blur-[60px] float-anim"></div>
-                 <div className="absolute bottom-[10%] right-[10%] w-64 h-64 bg-slate-400/40 rounded-full blur-[60px] float-anim"></div>
+          <div className="landing-screen h-full w-full flex flex-col items-center justify-center relative overflow-hidden text-white p-4 select-none">
+            <svg className="landing-flow" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+              <path className="landing-flow__blue" d="M1440 90 C1210 25 1135 130 1060 245 C985 358 900 350 830 310 C738 258 646 246 574 330 C494 424 373 409 272 370 C169 330 71 338 0 384 L0 525 C111 465 188 467 282 503 C408 551 524 530 618 449 C690 387 762 391 845 430 C970 489 1089 451 1164 349 C1243 240 1321 224 1440 270 Z" />
+              <path className="landing-flow__line" d="M-45 670 C136 555 231 568 367 650 C470 712 575 738 702 664" />
+              <path className="landing-flow__accent" d="M1060 -25 C1150 70 1270 82 1485 14" />
+            </svg>
+            <div className="landing-content z-10 text-center flex flex-col items-center">
+              <div className="landing-hero">
+                <div className="landing-copy">
+                  <h1 className="landing-heading">SELF PHOTO <span>MACHINE.</span></h1>
+                  <p className="landing-description">Siap buat momen favoritmu?</p>
+                  <button onClick={handleStart} className="landing-start">
+                    START PHOTO <span className="landing-start__arrow"><ChevronRight aria-hidden="true" size={25} /></span>
+                  </button>
+                </div>
+                <div className="landing-art">
+                  <img src="/assets/landing-mascot.svg" alt="" aria-hidden="true" className="landing-camera" />
+                  <span className="landing-sticker landing-sticker--cheese" aria-hidden="true">SAY CHEESE!</span>
+                  <span className="landing-sticker landing-sticker--pose" aria-hidden="true">POSE DULU!</span>
+                  <span className="landing-sticker landing-sticker--snap" aria-hidden="true">CEKREK!</span>
+                </div>
+              </div>
             </div>
-            <div className="z-10 text-center animate-fade-in-up flex flex-col items-center">
-              <div className="relative mt-8 md:mt-12 pointer-events-none w-full flex justify-center">
-                <img src="/assets/title.png" alt="UniSmile Photo Title" className="w-[85vw] max-w-[1200px] h-auto drop-shadow-2xl transform hover:scale-105 transition-transform duration-500" />
-                {customSubtitle && <div className="absolute -bottom-10 left-1/2 -translate-x-1/2 bg-white/20 backdrop-blur-md px-6 py-2 rounded-full border border-white/30 font-bold text-2xl md:text-3xl whitespace-nowrap shadow-xl">x {customSubtitle}</div>}
-              </div>
-              <div className="-mt-16 md:-mt-32 z-20 relative">
-                <button onClick={handleStart} className="group relative active:scale-95 transition-all hover:scale-[1.03]">
-                  <img src="/assets/start.png" alt="Start Photo" className={`h-auto drop-shadow-xl ${isAirTouch ? 'w-[450px] md:w-[550px]' : 'w-[350px] md:w-[450px]'}`} />
-                </button>
-              </div>
-              
-              {/* Branding Logos */}
-              <div className="mt-8 pb-8 flex items-center justify-center gap-10 opacity-90 overflow-hidden px-4">
+              <div className="landing-logos flex items-center justify-center gap-10 px-4">
                   <img src="/assets/LOGO UNI INSIDE.png" alt="Uni Inside" className="h-12 md:h-16 object-contain" />
                   <img src="/assets/LOGO KOLAB.png" alt="Kolab" className="h-12 md:h-16 object-contain" />
                   <img src="/assets/LOGO UNI SMILE.png" alt="Uni Smile" className="h-12 md:h-16 rounded-xl object-contain" />
-              </div>
             </div>
             <footer id="photobooth-customer-support" className="absolute bottom-4 left-4 right-4 z-10 text-center text-xs leading-relaxed text-white/70 landscape:right-auto landscape:w-72 landscape:max-w-[calc(100vw_-_2rem)] landscape:text-left">
               <p>Layanan customer support untuk pertanyaan maupun kendala penggunaan photobooth.</p>
               <p>WhatsApp: <span className="whitespace-nowrap">087897574789</span> <span aria-hidden="true"> · </span> Email: <span className="whitespace-nowrap">uninsidemed@gmail.com</span></p>
             </footer>
-            <div className="absolute top-8 left-8 flex gap-4 z-50">
+            <div className="landing-ticker" aria-hidden="true"><div className="landing-ticker__track">{[0, 1].map(i => <span key={i} className="landing-ticker__copy">{'SAY CHEESE ✦ POSE ✦ CEKREK ✦ PRINT ✦ '.repeat(6)}</span>)}</div></div>
+            <div className="landing-nav landing-nav--back absolute top-8 left-8 flex gap-4 z-50">
                <BackButton id="btn-back-landing" onClick={goToSignage} uiMode={uiMode} />
             </div>
-            <div className="absolute top-8 right-8 flex gap-4 z-50">
+            <div className="landing-nav landing-nav--settings absolute top-8 right-8 flex gap-4 z-50">
                {showCursorLockIcon && <button id="btn-toggle-cursor-lock-landing" onClick={() => setIsCursorLocked(!isCursorLocked)} className={`rounded-full backdrop-blur-sm transition-colors border-2 ${isAirTouch ? 'p-6' : 'p-4'} ${isCursorLocked ? 'bg-red-500/20 border-red-400 text-white' : 'bg-white/10 border-white/20 text-white/70 hover:bg-white/20'}`} style={{ display: isAirTouch ? 'block' : 'none' }}>{isCursorLocked ? <Lock size={isAirTouch?40:32}/> : <Unlock size={isAirTouch?40:32}/>}</button>}
                {showCalibrationIcon && <button id="btn-calibrate-landing" onClick={() => setIsCalibrating(true)} className={`${isAirTouch ? 'p-6' : 'p-4'} rounded-full backdrop-blur-sm transition-colors bg-white/10 text-white/70 hover:bg-white/20 border-2 border-white/20`} style={{ display: isAirTouch ? 'block' : 'none' }}><Scan size={isAirTouch?40:40} /></button>}
                <button id="btn-admin-settings-landing" onClick={onAdminClick} className={`text-white/70 hover:text-white transition-colors bg-white/10 ${isAirTouch ? 'p-6' : 'p-4'} rounded-full hover:bg-white/20 backdrop-blur-sm border-2 border-white/20`}><Settings size={isAirTouch?40:40} /></button>
@@ -3914,7 +3909,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PACKAGE' && (
-        <BoothWrapper title="Choose Package" subtitle="Select your preferred output" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => setStep('LANDING')} isVertical={isVertical}>
+        <BoothWrapper playful stripTicker title={<>CHOOSE <span>PACKAGE.</span></>} subtitle="Select your preferred output" onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => setStep('LANDING')} isVertical={isVertical}>
             {packageVisibilityStatus === 'loading' ? (
               <div className="h-full flex flex-col items-center justify-center gap-4 text-white">
                 <Loader2 className="animate-spin" size={44} />
@@ -3934,11 +3929,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 <p className="text-white/70">Silakan minta operator mengaktifkan paket di Admin.</p>
               </div>
             ) : (
-              <div className={`h-full flex flex-col items-center justify-center ${isVertical ? 'p-4 gap-6' : 'p-10 gap-10'}`}>
+              <div className={`package-options h-full flex items-center justify-center ${isVertical ? 'flex-col p-4 gap-4' : 'flex-wrap p-10 gap-6'}`}>
                 {packageVisibility.print && (
                   <button
                     onClick={() => handlePackageSelect('print')}
-                    className="w-full max-w-md bg-[#f6cd46] hover:bg-[#e5bc35] text-black rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all active:scale-95 shadow-xl hover:shadow-2xl border-4 border-transparent hover:border-white/50"
+                    className="package-card package-card--print w-full max-w-md p-8 flex flex-col items-center justify-center gap-4"
                   >
                     <Printer size={64} />
                     <h3 className="text-3xl font-black">Print + Digital</h3>
@@ -3948,11 +3943,11 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 {packageVisibility.digital && (
                   <button
                     onClick={() => handlePackageSelect('digital')}
-                    className="w-full max-w-md bg-white/10 hover:bg-white/20 text-white rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all active:scale-95 shadow-xl hover:shadow-2xl border border-white/20"
+                    className="package-card package-card--digital w-full max-w-md p-8 flex flex-col items-center justify-center gap-4"
                   >
                     <Download size={64} />
                     <h3 className="text-3xl font-black">Digital Only</h3>
-                    <p className="text-center text-white/70">1–3 strip · 2/4/6 kali foto · pilih hasil digital</p>
+                    <p className="text-center">1–4 strip · 2 foto untuk setiap strip · pilih hasil digital</p>
                   </button>
                 )}
               </div>
@@ -3961,26 +3956,21 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'LAYOUT' && (
-        <BoothWrapper title="Pilih Jumlah Strip" subtitle={selectedPackage === 'print' ? 'Print: 1 strip, ambil 2 foto lalu pilih 1.' : 'Digital: pilih 1–3 strip, ambil 2 foto untuk setiap strip.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => { setPackageVisibilityStatus('loading'); setStep('PACKAGE'); }} isVertical={isVertical}>
-            <div className={`h-full flex flex-col ${isVertical ? 'p-4' : isAirTouch ? 'p-10' : 'p-6 md:p-10'}`}>
-                <div className={`flex-1 overflow-y-auto flex items-center justify-center`}>{/* Kontainer diperlebar (2026-09-30): kartu layout tadinya kecil — max-w-xs di vertikal hanya ~320px (kartu ~154px), max-w-4xl di horizontal. Semua mode naik satu-dua tingkat supaya pratinjau layout terbaca jelas dari jarak pengunjung. */}
-                    <div className={`flex flex-wrap justify-center items-center w-full mx-auto ${isVertical ? 'gap-3 max-w-md pt-2 pb-4' : isAirTouch ? 'gap-10 md:gap-14 max-w-6xl' : 'gap-5 md:gap-8 max-w-5xl lg:max-w-6xl pb-6'}`}>
-                        {[{id: '1x1', label: '1 strip', count: 1}, {id: '2x1', label: '2 strip', count: 2}, {id: '3x1', label: '3 strip', count: 3}]
+        <BoothWrapper playful stripTicker title={<>PILIH JUMLAH <span>STRIP.</span></>} subtitle={selectedPackage === 'print' ? 'Print: 1 strip, ambil 2 foto lalu pilih 1.' : 'Digital: pilih 1–4 strip, ambil 2 foto untuk setiap strip.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} onBack={() => { setPackageVisibilityStatus('loading'); setStep('PACKAGE'); }} isVertical={isVertical}>
+            <div className={`strip-layout ${isVertical ? 'strip-layout--vertical' : ''}`}>
+                <div className="strip-layout__scroll">
+                    <div className="strip-layout__options">
+                        {[{id: '1x1', label: '1 strip', count: 1}, {id: '2x1', label: '2 strip', count: 2}, {id: '3x1', label: '3 strip', count: 3}, {id: '4x1', label: '4 strip', count: 4}]
                         .filter(layout => isWorkflowLayoutAllowed(layout.id as GridLayoutId))
                         .map((layout) => (
                             <button 
                               key={layout.id} 
                               onClick={() => handleLayoutSelect(layout.id as GridLayoutId)} 
-                              className={`group relative aspect-[4/5] bg-white/10 backdrop-blur-md rounded-2xl border-2 border-white/20 hover:bg-white/20 hover:border-pink-400 hover:scale-105 transition-all flex flex-col items-center justify-center shrink-0
-                              ${isVertical 
-                                ? 'w-[calc(50%-0.375rem)] gap-2 p-3 shadow-lg' 
-                                : isAirTouch 
-                                  ? 'w-[calc(50%-1.25rem)] md:w-[calc(25%-2.625rem)] gap-6 p-6 shadow-2xl rounded-3xl' 
-                                  : 'w-[calc(50%-0.625rem)] md:w-[calc(25%-1.5rem)] gap-4 p-5 shadow-xl rounded-3xl'}`}
+                              className="strip-choice relative aspect-[4/5] rounded-2xl transition-all flex flex-col items-center justify-center shrink-0"
                             >
-                                 <div className={`grid gap-1 w-full h-full rounded-xl ${isVertical ? 'p-2' : 'p-3 gap-2'} ${layout.id === '1x1' ? 'grid-cols-1 grid-rows-1' : layout.id === '2x1' ? 'grid-cols-1 grid-rows-2' : layout.id === '3x1' ? 'grid-cols-1 grid-rows-3' : layout.id === '4x1' ? 'grid-cols-1 grid-rows-4' : layout.id === '2x2' ? 'grid-cols-2 grid-rows-2' : layout.id === '2x3' ? 'grid-cols-2 grid-rows-3' : 'grid-cols-3 grid-rows-3'}`}>{Array.from({length: layout.count}).map((_, i) => (<div key={i} className="bg-white/40 rounded-sm group-hover:bg-pink-300/60 transition-colors"></div>))}</div>
-                                <span className={`font-bold tracking-wide ${isVertical ? 'text-sm' : isAirTouch ? 'text-2xl md:text-3xl' : 'text-base md:text-xl'}`}>{layout.label}</span>
-                                <span className="text-sm font-bold text-[#f6cd46]">
+                                 <div className="strip-choice__preview" aria-hidden="true">{Array.from({length: layout.count}).map((_, i) => (<div key={i} className={`strip-choice__sample strip-choice__sample--${layout.count}-${i}`}><div /><div /></div>))}</div>
+                                <span className="strip-choice__label">{layout.label}</span>
+                                <span className="strip-choice__price text-sm font-bold">
                                   {(() => {
                                     const style = (frames.find(frame => frame.id === layout.id) as any)?.styles?.find((candidate: FrameStyle) => getEffectiveLayoutConfig(candidate, layout.id).slots.length === layout.count);
                                     const value = positiveNumber(style?.[selectedPackage === 'digital' ? 'digital_price' : 'digital_print_price'], style?.price);
@@ -4451,16 +4441,16 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
         </div>
       )}
       {step === 'EDIT' && (
-        <BoothWrapper title="Customize Your Photo" subtitle="Pick a frame and filter" hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper playful featureHeading title={<>CUSTOMIZE YOUR <span>PHOTO.</span></>} subtitle="Pick a frame and filter" hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
             {/* VERTICAL: stack preview top + controls bottom. HORIZONTAL: side by side */}
-            <div className={`h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
+            <div className={`edit-screen h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden relative`}>
                 {/* Preview area – top in vertical, left in horizontal.
                     Perbaikan (2026-09-30): preview di vertikal terpotong bar atas
                     karena maxHeight (45vh) melebihi tinggi wadahnya (38%) —
                     bagian atas kegunting tepat di bawah bar. Wadah diberi ruang
                     atas lebih (pt-5) dan tinggi preview disetel di bawah wadah
                     (34vh) supaya utuh dan sedikit tersibak ke bawah. */}
-                <div className={`flex flex-col items-center justify-center overflow-hidden relative ${isVertical ? 'h-[40%] shrink-0 px-2 pb-2 pt-5' : 'flex-1 p-12'}`}>
+                <div className={`edit-preview flex flex-col items-center justify-center overflow-hidden relative ${isVertical ? 'h-[40%] shrink-0 px-2 pb-2 pt-5' : 'edit-preview--landscape flex-1 p-12'}`}>
                     <div className="w-full min-h-0 flex-1 flex flex-col items-center justify-center gap-2">
                         {selectedPackage === 'print' && selectedPrintPhotoIndex !== null && capturedPhotos[selectedPrintPhotoIndex] && (
                             <p id="print-monochrome-print-notice" className="max-w-3xl shrink-0 text-center text-xs font-semibold leading-snug text-[#f6cd46]">
@@ -4497,7 +4487,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                         </div>
                     </div>
                     {!isVertical && (
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-max flex items-center justify-center gap-12 opacity-100 pointer-events-none">
+                      <div className="playful-logos absolute bottom-6 left-1/2 -translate-x-1/2 w-max flex items-center justify-center gap-12 pointer-events-none">
                           <img src="/assets/LOGO UNI INSIDE.png" alt="Uni Inside" className="h-12 md:h-16 object-contain" />
                           <img src="/assets/LOGO KOLAB.png" alt="Kolab" className="h-12 md:h-16 object-contain" />
                           <img src="/assets/LOGO UNI SMILE.png" alt="Uni Smile" className="h-12 md:h-16 rounded-xl object-contain" />
@@ -4506,18 +4496,20 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                 </div>
 
                 {/* Controls – bottom in vertical, right in horizontal */}
-                <div className={`bg-[#0c1633] border-white/10 flex flex-col z-20 shadow-[-10px_0_40px_rgba(0,0,0,0.3)] overflow-hidden ${isVertical ? 'flex-1 border-t min-h-0' : 'w-[450px] border-l'}`}>
+                <div className={`edit-controls bg-[#0c1633] border-white/10 flex flex-col z-20 overflow-hidden ${isVertical ? 'flex-1 border-t min-h-0' : 'w-[450px] border-l'}`}>
                     {/* Tabs */}
-                    <div className={`grid grid-cols-2 shrink-0 border-b border-white/5 ${isVertical ? 'gap-1.5 p-2' : 'gap-2 p-3'}`}>
+                    <div className={`edit-tabs grid grid-cols-2 shrink-0 ${isVertical ? 'gap-1.5 p-2' : 'gap-2 p-3'}`}>
                         <button 
                             onClick={() => setEditTab('FRAMES')} 
-                            className={`rounded-lg font-bold uppercase tracking-tight transition-all ${isVertical ? 'py-6 text-lg' : 'py-5 text-xl'} ${editTab === 'FRAMES' ? 'bg-[#f6cd46] text-black shadow-[0_0_15px_rgba(246,205,70,0.3)]' : 'bg-[#1b2b5a] text-white/60 hover:text-white'}`}
+                            aria-pressed={editTab === 'FRAMES'}
+                            className={`edit-tab rounded-lg font-bold uppercase transition-all ${isVertical ? 'py-6 text-lg' : 'py-5 text-xl'}`}
                         >
                             1. Pilih Frame
                         </button>
                         <button 
                             onClick={() => setEditTab('FILTERS')} 
-                            className={`rounded-lg font-bold uppercase tracking-tight transition-all ${isVertical ? 'py-6 text-lg' : 'py-5 text-xl'} ${editTab === 'FILTERS' ? 'bg-[#f6cd46] text-black shadow-[0_0_15px_rgba(246,205,70,0.3)]' : 'bg-[#1b2b5a] text-white/60 hover:text-white'}`}
+                            aria-pressed={editTab === 'FILTERS'}
+                            className={`edit-tab rounded-lg font-bold uppercase transition-all ${isVertical ? 'py-6 text-lg' : 'py-5 text-xl'}`}
                         >
                             2. Pilih Filter
                         </button>
@@ -4546,7 +4538,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                                 </div>
                                             )}
                                             <div className="absolute bottom-0 left-0 right-0 p-1 bg-gradient-to-t from-black/80 to-transparent z-10">
-                                                <span className="text-white text-[9px] font-bold truncate block">{style.name}</span>
+                                                <span className="text-white text-xs font-bold truncate block">{style.name}</span>
                                             </div>
                                         </button>
                                     );
@@ -4568,7 +4560,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                             </div>
                                         )}
                                         <div className="absolute bottom-0 left-0 right-0 p-1 bg-gradient-to-t from-black/80 to-transparent text-center">
-                                            <span className="text-white text-[9px] font-black uppercase tracking-widest">{f.name}</span>
+                                            <span className="text-white text-xs font-bold uppercase">{f.name}</span>
                                         </div>
                                     </button>
                                 ))}
@@ -4580,7 +4572,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                     <div className={`shrink-0 border-t border-white/5 ${isVertical ? 'p-2 space-y-1.5' : 'p-3 space-y-2'}`}>
                         <button 
                             onClick={handleFinish} 
-                            className={`w-full bg-white hover:bg-gray-100 text-[#0c1633] rounded-xl font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 shadow-lg ${isVertical ? 'py-8 text-2xl' : 'py-6 text-2xl'}`}
+                            className={`edit-finish w-full rounded-xl font-bold uppercase tracking-wide transition-all active:scale-95 flex items-center justify-center gap-2 ${isVertical ? 'py-8 text-2xl' : 'py-6 text-2xl'}`}
                         >
                             {selectedPackage === 'print' ? 'CETAK & SELESAI' : 'SIMPAN DIGITAL & SELESAI'}
                         </button>
@@ -4591,53 +4583,51 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PRINT_SELECTION' && (
-        <BoothWrapper title={selectedPackage === 'print' ? 'Pilih Foto untuk Print' : 'Pilih Foto Digital'} subtitle={`Pilih ${outputCount} dari ${candidateCount} foto. Ketuk foto lain untuk mengganti pilihan terakhir. Retake tersedia sebelum konfirmasi.`} hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
-          <div className="h-full flex flex-col bg-[#0a1128] text-white p-6 gap-6">
-            <p id="selected-photo-counter" className="text-center text-lg">{selectedPhotoIndices.length}/{outputCount} foto dipilih · {selectedPackage === 'print' ? '1 strip cetak + salinan digital; label tanpa artwork frame' : `${outputCount} strip digital, tanpa cetak fisik`}</p>
-            <div role="group" aria-label="Pilihan hasil foto" className="flex-1 min-h-0 overflow-y-auto grid grid-cols-2 md:grid-cols-3 gap-4 content-start">
+        <BoothWrapper playful title={selectedPackage === 'print' ? 'Pilih Foto untuk Print' : 'Pilih Foto Digital'} subtitle={`Pilih ${outputCount} dari ${candidateCount} foto. Ketuk foto lain untuk mengganti pilihan terakhir. Retake tersedia sebelum konfirmasi.`} hideAdmin isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+          <div className="photo-selection h-full flex flex-col text-white p-4 md:p-6 gap-4">
+            <p id="selected-photo-counter" className="photo-selection__counter text-center text-lg">{selectedPhotoIndices.length}/{outputCount} foto dipilih · {selectedPackage === 'print' ? '1 strip cetak + salinan digital; label tanpa artwork frame' : `${outputCount} strip digital, tanpa cetak fisik`}</p>
+            <div role="group" aria-label="Pilihan hasil foto" className="photo-selection__grid flex-1 min-h-0 overflow-y-auto">
               {capturedPhotos.map((photo, index) => (
                 <div key={index} className="flex flex-col gap-2">
                   <button id={`btn-select-print-photo-${index}`} role="checkbox"
                     aria-checked={selectedPhotoIndices.includes(index)} aria-label={`Foto ${index + 1}`}
                     disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
                     onClick={() => handlePhotoSelection(index)}
-                    className={`rounded-xl overflow-hidden border-4 bg-[#1b2b5a] disabled:opacity-50 ${selectedPhotoIndices.includes(index) ? 'border-[#f6cd46]' : 'border-transparent'}`}>
+                    className={`photo-selection__photo rounded-xl overflow-hidden border-4 disabled:opacity-50 ${selectedPhotoIndices.includes(index) ? 'border-[#f6cd46]' : 'border-transparent'}`}>
                     {renderCandidatePreview(index)}
                     <span className="block py-3 font-bold">Foto {index + 1}{selectedPhotoIndices.includes(index) ? ` ✓ Pilihan ${selectedPhotoIndices.indexOf(index) + 1}` : ''}</span>
                   </button>
                   <button id={`btn-retake-candidate-${index}`} onClick={() => handleRetakePhoto(index)}
                     disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current || captureExpired || (captureDeadline !== null && Date.now() >= captureDeadline)}
-                    className="rounded-xl bg-white/10 px-4 py-3 font-bold disabled:opacity-40">Retake Foto {index + 1}</button>
+                    className="photo-selection__retake rounded-xl px-4 py-3 font-bold disabled:opacity-40">Retake Foto {index + 1}</button>
                 </div>
               ))}
             </div>
             <div className="flex gap-4 justify-center shrink-0">
               <button id="btn-retake-batch" onClick={handleRetake}
                 disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                className="px-6 py-4 rounded-xl bg-white/10">Ulang Semua Foto</button>
+                className="photo-selection__retake px-6 py-4 rounded-xl disabled:opacity-40">Ulang Semua Foto</button>
               <button id="btn-confirm-print-photo" onClick={handleConfirmPrintSelection}
                 disabled={selectedPhotoIndices.length !== outputCount || capturedPhotos.length !== candidateCount || printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                className="px-8 py-4 rounded-xl bg-[#f6cd46] text-black font-bold disabled:opacity-40">Konfirmasi {outputCount} Foto</button>
+                className="result-button result-button--primary px-8 py-4 rounded-xl disabled:opacity-40">Konfirmasi {outputCount} Foto</button>
             </div>
           </div>
         </BoothWrapper>
       )}
 
       {step === 'RESULT' && (
-        <BoothWrapper title={selectedPackage === 'print' ? 'Hasil Digital + Print' : 'Hasil Digital'} subtitle={selectedPackage === 'print' ? '1 foto pilihan untuk 1 strip cetak dan salinan digital.' : 'Foto pilihan Anda siap diunduh.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
+        <BoothWrapper playful featureHeading title={selectedPackage === 'print' ? <>HASIL DIGITAL + <span>PRINT.</span></> : <>HASIL <span>DIGITAL.</span></>} subtitle={selectedPackage === 'print' ? '1 foto pilihan untuk 1 strip cetak dan salinan digital.' : 'Foto pilihan Anda siap diunduh.'} onAdminClick={onAdminClick} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} uiMode={uiMode} hideLogos isVertical={isVertical}>
             {/* VERTICAL: stack QR top + preview bottom. HORIZONTAL: panel left + preview right */}
-            <div className={`h-full flex ${isVertical ? 'flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
+            <div className={`result-shell h-full flex ${isVertical ? 'result-shell--vertical flex-col' : 'flex-row'} overflow-hidden bg-[#0a1128] relative text-white`}>
                  {/* QR / info panel – left in horizontal, top in vertical */}
-                 <div className={`flex bg-[#0c1633] border-white/10 z-20 shrink-0 ${
+                 <div className={`result-info flex z-20 shrink-0 ${
                    isVertical
                      ? 'w-full border-b flex-row items-center gap-3 px-3 py-2.5' 
                      : 'w-full lg:w-[450px] xl:w-[500px] h-full border-r flex-col items-center justify-center p-8 lg:p-12 overflow-y-auto custom-scrollbar'
                  }`} style={isVertical ? { height: '36%' } : {}}>
                      {/* QR Code block */}
                      {selectedPackage && (
-                     <div id="digital-download-panel" className={`bg-[#1b2b5a] rounded-3xl flex flex-col items-center justify-center border-4 transition-colors shrink-0 ${
-                       downloadUrl ? 'border-green-400' : 'border-dashed border-white/20'
-                     } ${isVertical ? 'h-full aspect-square p-1.5' : 'w-full max-w-[360px] p-8 mb-6 shadow-[0_10px_40px_rgba(0,0,0,0.5)]'}`}>
+                     <div id="digital-download-panel" className={`result-qr flex flex-col items-center justify-center shrink-0 ${isVertical ? 'h-full aspect-square p-1.5' : 'w-full max-w-[360px] p-6 mb-5'}`}>
                          {downloadUrl ? (
                              <>
                                  {/* QR memenuhi kotak bordernya (2026-09-30) — dulu
@@ -4649,7 +4639,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                      selebar panel): di vertikal tinggi 24vh dengan
                                      aspect-square; di horizontal lebar mengikuti isi
                                      (w-fit) — keduanya di-tengah agar rapi. */}
-                                 <div className={`bg-white rounded-2xl shadow-xl animate-fade-in overflow-hidden ${isVertical ? 'h-[24vh] aspect-square mx-auto p-1.5 mb-1 flex items-center justify-center' : 'w-fit mx-auto p-3 mb-5'}`}>
+                                 <div className={`result-qr__image bg-white overflow-hidden ${isVertical ? 'h-[24vh] max-h-[75%] aspect-square mx-auto p-1.5 mb-1 flex items-center justify-center' : 'w-fit mx-auto p-3 mb-4'}`}>
                                       {(() => {
                                         const qrTarget = encodeURIComponent(downloadUrl);
                                         return (
@@ -4661,20 +4651,15 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                         );
                                       })()}
                                  </div>
-                                 <span className={`font-black text-green-400 ${isVertical ? 'text-base' : 'text-3xl mb-1 tracking-tight'}`}>Scan to Download</span>
-                                 {!isVertical && <span className="text-base font-medium text-white/50">Valid for 24 hours</span>}
-                                 {!isVertical && (
-                                   <span className="mt-3 px-4 py-2 text-center text-sm font-bold text-[#f6cd46] bg-[#f6cd46]/10 border border-[#f6cd46]/40 rounded-xl">
-                                     ⚠ Jangan tutup halaman ini sebelum QR berhasil discan!
-                                   </span>
-                                 )}
+                                 <span className={`result-qr__title ${isVertical ? 'text-base' : 'text-3xl mb-1'}`}>Scan to Download</span>
+                                 {!isVertical && <span className="result-qr__valid">Valid for 24 hours</span>}
                              </>
                          ) : (
-                             <div className="flex flex-col items-center text-white/40 text-center">
+                             <div className="flex flex-col items-center text-[#33467b] text-center">
                                  {uploadStatus === 'error' ? (
                                      <>
-                                         <AlertCircle size={isVertical ? 32 : 80} className="text-red-400" />
-                                         <span className={`font-bold text-red-300 text-center ${isVertical ? 'text-xs mt-1' : 'text-lg mt-4 mb-4'}`}>{uploadError || 'Upload ke backend gagal.'}</span>
+                                         <AlertCircle size={isVertical ? 32 : 80} className="text-red-700" />
+                                         <span className={`font-bold text-red-700 text-center ${isVertical ? 'text-xs mt-1' : 'text-lg mt-4 mb-4'}`}>{uploadError || 'Upload ke backend gagal.'}</span>
                                      </>
                                  ) : uploadStatus === 'uploading' ? (
                                      <>
@@ -4695,33 +4680,35 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                      <div className={`flex flex-col ${isVertical ? 'flex-1 justify-center gap-1.5 min-w-0' : 'w-full max-w-[360px] mt-2 gap-3'}`}>
                          {!isVertical && (
                            <>
-                             <h2 className="text-2xl font-black text-center">Thank you!</h2>
-                             <p className="text-white/60 text-center text-xs mb-2">{selectedPackage === 'print' ? 'Scan QR untuk salinan digital; foto pilihan juga tersedia untuk dicetak.' : 'Scan QR untuk mengunduh foto pilihan.'}</p>
+                             <h2 className="result-thanks text-center">Thank you!</h2>
+                             <p className="result-copy text-center text-sm mb-2">{selectedPackage === 'print' ? 'Scan QR untuk salinan digital; foto pilihan juga tersedia untuk dicetak.' : 'Scan QR untuk mengunduh foto pilihan.'}</p>
                            </>
                          )}
                          {isVertical && downloadUrl && (
-                           <p className="text-green-400 font-black text-base text-center">Scan to Download</p>
+                           <p className="result-vertical-heading text-center">Foto kamu siap!</p>
                          )}
                          {downloadUrl && (
-                           <p className={`w-full text-center font-black text-[#f6cd46] bg-[#f6cd46]/10 border border-[#f6cd46]/40 rounded-xl ${isVertical ? 'px-3 py-2.5 text-sm leading-snug' : 'px-5 py-3 text-base'}`}>
-                             ⚠ Jangan tutup halaman ini sebelum QR berhasil discan!
+                           <p className={`result-notice w-full text-center ${isVertical ? 'px-3 py-2.5 text-sm leading-snug' : 'px-5 py-3 text-sm'}`}>
+                             Jangan tutup halaman sebelum QR berhasil dipindai.
                            </p>
                          )}
                          {tombol.retake && uploadStatus !== 'uploading' && !isPrintActive && printState !== 'success' && btPrintState !== 'done' && (
-                         <button onClick={handleRetake} className={`w-full px-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-1.5 border border-white/20 active:scale-95 ${isVertical ? 'py-2 text-xs' : 'py-3'}`}>
+                         <button onClick={handleRetake} className={`result-button result-button--secondary w-full px-3 flex items-center justify-center gap-1.5 ${isVertical ? 'py-2 text-xs' : 'py-3'}`}>
                              <RefreshCw size={14} /> New Photo
                          </button>
                          )}
-                         <button onClick={handleHome} className={`w-full px-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold uppercase tracking-wide transition-all flex items-center justify-center border border-white/20 active:scale-95 ${isVertical ? 'py-6 text-lg' : 'py-5 text-xl'}`}>
+                         <button onClick={handleHome} className={`result-button result-button--primary w-full px-3 flex items-center justify-center ${isVertical ? 'py-4 text-lg' : 'py-4 text-xl'}`}>
                              Home
                          </button>
                      </div>
                  </div>
 
                  {/* Preview & actions panel – right in horizontal, bottom in vertical */}
-                 <div className={`flex-1 flex flex-col items-center overflow-hidden relative ${isVertical ? 'justify-between py-3 px-4' : 'justify-center p-6 pb-28 h-full'}`}>
+                 <div className={`result-preview flex-1 flex flex-col items-center overflow-hidden relative ${isVertical ? 'justify-between py-3 px-4' : 'justify-center p-6 pb-28 h-full'}`}>
+                    <div className="result-preview__shapes" aria-hidden="true"><span /><span /><span /></div>
+                    <div className="result-preview__stamp" aria-hidden="true">GOOD<br />TIMES <span>✳</span></div>
                     {/* Preview Image */}
-                    <div className={`w-full flex items-center justify-center drop-shadow-[0_20px_50px_rgba(0,0,0,0.5)] ${isVertical ? 'flex-1 min-h-0' : 'h-full max-h-[70vh] mt-4'}`}>
+                    <div className={`result-preview__photo w-full flex items-center justify-center ${isVertical ? 'flex-1 min-h-0' : 'h-full max-h-[70vh] mt-4'}`}>
                         <PreviewComponent maxHeightStr={isVertical ? '40vh' : '70vh'} shadow={true} id="final-preview-container" />
                     </div>
 
@@ -4788,9 +4775,9 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                               id="btn-bluetooth-print"
                               onClick={() => void handleBluetoothPrint()}
                               disabled={!areAssetsReady || btPrintState === 'done' || btPrintState === 'connecting' || btPrintState === 'printing'}
-                              className={`flex items-center gap-3 bg-[#2563eb] hover:bg-[#1d4ed8] text-white rounded-full shadow-[0_10px_20px_rgba(37,99,235,0.35)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${isVertical ? 'px-12 py-7 text-3xl' : 'px-12 py-7 text-3xl'}`}
+                              className={`result-button result-button--primary flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${isVertical ? 'px-8 py-2.5 text-base' : 'px-12 py-4 text-xl'}`}
                             >
-                              <Printer size={isVertical ? 40 : 40} className={btPrintState === 'connecting' || btPrintState === 'printing' ? 'animate-pulse' : ''} />
+                              <Printer size={20} className={btPrintState === 'connecting' || btPrintState === 'printing' ? 'animate-pulse' : ''} />
                               {btPrintState === 'connecting' && 'Menyambungkan…'}
                               {btPrintState === 'printing' && 'Mencetak…'}
                               {btPrintState === 'done' && 'Cetak Bluetooth ✓'}
@@ -4810,7 +4797,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                                 }
                             }}
                             disabled={!areAssetsReady || isSending || uploadStatus === 'uploading' || uploadStatus === 'preparing'}
-                            className={`flex items-center gap-2 bg-[#f6cd46] hover:bg-[#e5bc35] text-black rounded-full shadow-[0_10px_20px_rgba(246,205,70,0.3)] transition-all active:scale-95 italic font-serif disabled:opacity-50 disabled:cursor-not-allowed ${isVertical ? 'px-8 py-2.5 text-base' : 'px-12 py-4 text-xl'}`}
+                            className={`result-button result-button--email flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${isVertical ? 'px-8 py-2.5 text-base' : 'px-12 py-4 text-xl'}`}
                         >
                             Send Email
                         </button>
@@ -4895,7 +4882,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
 
                     {/* Branding Logos */}
                     {!isVertical && (
-                      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-max flex items-center justify-center gap-12 opacity-80 pointer-events-none">
+                      <div className="playful-logos absolute bottom-6 left-1/2 -translate-x-1/2 w-max flex items-center justify-center gap-12 pointer-events-none">
                           <img src="/assets/LOGO UNI INSIDE.png" alt="Uni Inside" className="h-12 md:h-16 object-contain" />
                           <img src="/assets/LOGO KOLAB.png" alt="Kolab" className="h-12 md:h-16 object-contain" />
                           <img src="/assets/LOGO UNI SMILE.png" alt="Uni Smile" className="h-12 md:h-16 rounded-xl object-contain" />

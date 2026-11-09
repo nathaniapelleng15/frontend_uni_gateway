@@ -25,6 +25,22 @@ test('Print full composite uses original Admin canvas and slot, not locked Niimb
   assert.equal(await run('generateCompositeImage',scope)(),'708x1062');
   assert.deepEqual(calls,[[40,60,628,782]]);
 });
+
+test('digital composite preserves photo color independently of thermal printer saturation',async()=>{
+  const filters=[];
+  const ctx={fillRect(){},save(){},restore(){},beginPath(){},rect(){},clip(){},strokeRect(){},
+    set filter(value){filters.push(value);}};
+  const canvas={getContext:()=>ctx,toDataURL:()=>'digital'};
+  const scope={selectedPackage:'print',selectedLayoutId:'1x1',printSelectionConfirmed:true,selectedOutputPhotos:['color-photo'],outputCount:1,
+    selectedFrame:null,processedFrame:null,selectedFilter:null,photoAdjust:{brightness:120,contrast:90,saturation:0},
+    getEffectiveLayoutConfig:()=>admin,loadImageElement:async()=>({naturalWidth:555,naturalHeight:573}),drawCoverInto:()=>{},
+    getSlotBorderConfig:()=>({width:1,color:'white'}),document:{createElement:()=>canvas},console};
+  assert.equal(await run('generateCompositeImage',scope)(),'digital');
+  assert.equal(filters.at(-1),'none');
+  scope.selectedFilter={cssFilter:'sepia(60%)'};
+  assert.equal(await run('generateCompositeImage',scope)(),'digital');
+  assert.equal(filters.at(-1),'sepia(60%)');
+});
 test('frame-based color and mono UI use original Admin geometry while review stays capture-only',()=>{
   const scope={selectedPackage:'print',selectedFrame:null,processedFrame:null,selectedLayoutId:'1x1',selectedPhotoIndices:[],
     getEffectiveLayoutConfig:()=>admin,getPresentationLayoutConfig:()=>capture,getCaptureLayoutConfig:()=>capture};
