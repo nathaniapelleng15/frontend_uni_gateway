@@ -201,7 +201,7 @@ test('all Photobooth Back controls share one pill-button component', () => {
   assert.match(source, /const BackButton: React\.FC/);
   assert.match(source, /<BackButton onClick=\{onBack\} uiMode=\{uiMode\} \/>/);
   assert.match(source, /<BackButton id="btn-back-landing" onClick=\{goToSignage\} uiMode=\{uiMode\} \/>/);
-  assert.match(source, /<BackButton onClick=\{\(\) => setStep\('LAYOUT'\)\} uiMode=\{uiMode\} \/>/);
+  assert.match(source, /<BoothWrapper playful stripTicker [^\n]*onBack=\{\(\) => setStep\('LAYOUT'\)\}/);
   assert.match(source, /<BackButton[\s\S]*?handleResetScan\(\)[\s\S]*?uiMode=\{uiMode\}/);
   assert.doesNotMatch(source, /\/assets\/BACK\.png/,
     'payment Back controls must not keep the differently sized legacy image');

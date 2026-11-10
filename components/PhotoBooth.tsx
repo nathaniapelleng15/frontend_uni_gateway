@@ -517,9 +517,10 @@ interface BoothWrapperProps {
   playful?: boolean;
   stripTicker?: boolean;
   featureHeading?: boolean;
+  headerClassName?: string;
 }
 
-const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, showLockButton = true, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical, playful, stripTicker, featureHeading }) => (
+const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, onAdminClick, hideAdmin, isLocked, showLockButton = true, onToggleLock, uiMode, hideHeader, customBg, onBack, hideLogos, isVertical, playful, stripTicker, featureHeading, headerClassName = '' }) => (
   <div className={`${playful ? 'playful-booth' : ''} h-full w-full ${customBg || 'bg-[#0c1633]'} text-white flex flex-col overflow-hidden select-none relative`}>
       {/* Logos at Bottom Center for all wrapper screens */}
       {!hideLogos && (
@@ -531,7 +532,7 @@ const BoothWrapper: React.FC<BoothWrapperProps> = ({ children, title, subtitle, 
       )}
 
       {!hideHeader && (
-        <div className={`${playful ? 'playful-header' : 'bg-white/10 backdrop-blur-md border-b border-white/10'} ${stripTicker || featureHeading ? `strip-header ${isVertical && (!featureHeading || !hideAdmin) ? 'strip-header--vertical' : ''}` : ''} ${featureHeading ? (hideAdmin ? 'edit-heading' : 'result-heading') : ''} px-6 w-full flex justify-center relative items-center shrink-0 z-10 ${uiMode === 'air-touch' ? 'py-8' : isVertical ? 'py-3' : 'py-5'}`}>
+        <div className={`${playful ? 'playful-header' : 'bg-white/10 backdrop-blur-md border-b border-white/10'} ${stripTicker || featureHeading ? `strip-header ${isVertical && (!featureHeading || !hideAdmin) ? 'strip-header--vertical' : ''}` : ''} ${featureHeading ? (hideAdmin ? 'edit-heading' : 'result-heading') : ''} ${headerClassName} px-6 w-full flex justify-center relative items-center shrink-0 z-10 ${uiMode === 'air-touch' ? 'py-8' : isVertical ? 'py-3' : 'py-5'}`}>
             {/* Header actions are absolutely positioned so the title stays centered in the viewport. */}
             {onBack && (
                 <div className={`booth-header-back absolute left-3 top-1/2 -translate-y-1/2 z-20 ${isVertical ? '' : 'md:left-6'}`}>
@@ -3986,121 +3987,102 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
       )}
 
       {step === 'PAYMENT' && (
-        <BoothWrapper uiMode={uiMode} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} hideHeader customBg="bg-[#0c1633]" isVertical={isVertical}>
-             <div className="h-full w-full bg-[#0c1633] flex flex-col items-center justify-center relative overflow-hidden p-6">
-                
-                <div className="z-10 w-full max-w-7xl flex flex-col items-center">
-                    {/* Main Content Area */}
-                    <div className="flex flex-row items-center justify-center gap-12 lg:gap-20 w-full mt-2 lg:-mt-24">
-                        {/* E-Wallet Column */}
-                        <div className="hidden lg:flex flex-col items-center animate-fade-in-left">
-                            <img src="/assets/QRISEWALLET.png" alt="E-Wallet Partners" className="w-[400px] h-auto object-contain" />
-                        </div>
+        <BoothWrapper playful stripTicker headerClassName="payment-header" title={<>BAYAR DENGAN <span>QRIS.</span></>} onBack={() => setStep('LAYOUT')} hideAdmin uiMode={uiMode} isLocked={isCursorLocked} showLockButton={showCursorLockIcon} onToggleLock={() => setIsCursorLocked(!isCursorLocked)} isVertical={isVertical}>
+            <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pb-8 pt-6 sm:px-6">
+                <div className="my-auto flex w-full max-w-7xl items-center justify-center gap-6 xl:gap-16">
+                    {/* E-Wallet Column */}
+                    <div className="hidden lg:flex flex-1 justify-center">
+                        <img src="/assets/QRISEWALLET.png" alt="E-Wallet Partners" className="w-full max-w-[320px] h-auto object-contain" />
+                    </div>
 
-                        {/* Main Payment Section */}
-                        <div className="flex flex-col items-center shrink-0">
-                            {/* Title Section */}
-                            <div className="text-center mb-2 md:mb-4 lg:-mb-10 animate-fade-in flex flex-col items-center z-0 pointer-events-none">
-                                <img src="/assets/PAYWITHQR.png" alt="Pay With QR" className="h-32 md:h-48 lg:h-64 object-contain drop-shadow-md" />
+                    <div className="flex w-full max-w-[320px] flex-col items-center">
+                        <div className="w-full bg-[#fff3d8] border-2 border-[#20123b] flex flex-col items-center justify-center p-4 md:p-5 shadow-[0_6px_0_#090e21] rounded-2xl">
+                            <div className="flex justify-between items-center w-full mb-3 px-2">
+                                <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">QRIS</span>
+                                <span className="text-[#20123b] font-black text-lg md:text-xl">
+                                    {payableAmount === null
+                                      ? 'Harga belum tersedia'
+                                      : new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(payableAmount)}
+                                </span>
                             </div>
-
-                            {/* Main Payment Card */}
-                            <div className="flex flex-col items-center w-full max-w-[260px] md:max-w-[320px]">
-                                <div className="w-full bg-white flex flex-col items-center justify-center p-4 md:p-5 shadow-2xl rounded-2xl animate-scale-in relative">
-                                    <div className="flex justify-between items-center w-full mb-3 px-2">
-                                        <span className="font-bold text-gray-800 text-lg md:text-xl tracking-wide">QRIS</span>
-                                        <span className="text-[#00aead] font-black text-lg md:text-xl">
-                                            {payableAmount === null
-                                              ? 'Harga belum tersedia'
-                                              : new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(payableAmount)}
-                                        </span>
-                                    </div>
-                                    <p className="mb-2 text-xs font-bold text-gray-500">{selectedPackage === 'digital' ? 'Paket Digital' : 'Paket Digital + Print'}</p>
-                                    {uniqueCode !== null && (
-                                      <div className="w-full mb-2 px-2 text-[11px] md:text-xs font-bold text-gray-500 text-center uppercase tracking-wider">
-                                        Kode unik transaksi: <span className="text-[#00aead] font-black">+{uniqueCode}</span>
-                                      </div>
-                                    )}
-                                    <div className="flex-1 flex items-center justify-center w-full">
-                                        {paymentMethod === 'duitku_qris' && paymentPollingState === 'expired' ? (
-                                            <div className="w-full h-[40vh] flex items-center justify-center text-center text-gray-500 p-4">QRIS kedaluwarsa. Kembali untuk membuat transaksi baru.</div>
-                                        ) : qrisUrl ? (
-                                            <img
-                                              key={qrisUrl}
-                                              src={qrisUrl}
-                                              alt="QRIS Uni"
-                                              className="w-full h-auto max-h-[45vh] lg:max-h-[50vh] object-contain rounded-xl"
-                                            />
-                                        ) : (
-                                            <div className="w-full h-[40vh] flex flex-col items-center justify-center text-gray-400 gap-3">
-                                              <div className="animate-spin border-4 border-white/20 border-t-yellow-400 rounded-full w-10 h-10" />
-                                              <span className="text-sm">Memuat QRIS...</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                                
-                                {['duitku_qris', 'gopay_merchant_polling'].includes(paymentMethod) ? (
-                                  <div className="mt-4 md:mt-6 w-full rounded-xl border border-white/20 bg-white/10 p-4 text-center text-white">
-                                    <div className="flex items-center justify-center gap-2 font-bold">
-                                      {paymentPollingState === 'expired' ? (
-                                        <AlertCircle size={18} className="text-amber-300" />
-                                      ) : paymentPollingState === 'retrying' ? (
-                                        <RefreshCw size={18} className="animate-spin text-amber-300" />
-                                      ) : (
-                                        <Loader2 size={18} className="animate-spin text-[#f6cd46]" />
-                                      )}
-                                      {paymentPollingState === 'expired'
-                                        ? 'Sesi pembayaran berakhir'
-                                        : paymentPollingState === 'retrying'
-                                          ? 'Menyambungkan ulang'
-                                          : paymentPollingState === 'checking'
-                                            ? 'Memeriksa pembayaran'
-                                            : 'Menunggu konfirmasi otomatis'}
-                                    </div>
-                                    <p className="mt-2 text-sm text-white/75">
-                                      {paymentPollingState === 'expired'
-                                          ? 'Silakan kembali dan mulai sesi baru.'
-                                          : paymentPollingState === 'retrying'
-                                            ? 'Koneksi ke server terputus sementara. Pemeriksaan akan dicoba lagi otomatis.'
-                                            : paymentMethod === 'duitku_qris'
-                                              ? 'Scan QRIS ini untuk membayar. Sesi lanjut otomatis setelah pembayaran dikonfirmasi.'
-                                              : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
-                                    </p>
-                                    {flowError && <p className="mt-2 text-sm font-semibold text-amber-300">{flowError}</p>}
-                                    {paymentMethod === 'duitku_qris' && (
-                                      <p className="mt-2 text-xs text-white/75">
-                                        {paymentEnvironment === 'sandbox' && <strong className="block text-amber-300">Mode uji — pembayaran sandbox</strong>}
-                                        {paymentExpiresAt && <>Berlaku sampai {new Date(paymentExpiresAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
-                                      </p>
-                                    )}
-                                    {paymentMethod !== 'duitku_qris' && paymentPollingState !== 'expired' && (
-                                      <button onClick={handlePaymentConfirm} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-white/80 underline underline-offset-2 hover:text-white">
-                                        Periksa lewat kamera
-                                      </button>
-                                    )}
-                                  </div>
+                            <p className="mb-2 text-xs font-bold text-slate-700">{selectedPackage === 'digital' ? 'Paket Digital' : 'Paket Digital + Print'}</p>
+                            {uniqueCode !== null && (
+                              <div className="w-full mb-2 px-2 text-[11px] md:text-xs font-bold text-slate-700 text-center uppercase tracking-wider">
+                                Kode unik transaksi: <span className="text-[#20123b] font-black">+{uniqueCode}</span>
+                              </div>
+                            )}
+                            <div className="flex-1 flex items-center justify-center w-full">
+                                {paymentMethod === 'duitku_qris' && paymentPollingState === 'expired' ? (
+                                    <div className="w-full h-[40vh] flex items-center justify-center text-center text-slate-700 p-4">QRIS kedaluwarsa. Kembali untuk membuat transaksi baru.</div>
+                                ) : qrisUrl ? (
+                                    <img
+                                      key={qrisUrl}
+                                      src={qrisUrl}
+                                      alt="QRIS Uni"
+                                      className="w-full h-auto max-h-[37vh] object-contain rounded-xl bg-white p-2"
+                                    />
                                 ) : (
-                                  <button onClick={handlePaymentConfirm} className="mt-4 md:mt-6 w-full bg-[#f6cd46] hover:bg-[#e5bc35] text-black py-3 md:py-4 rounded-xl text-lg md:text-xl font-bold shadow-[0_10px_20px_rgba(246,205,70,0.3)] transition-all active:scale-95">
-                                    I Have Paid
-                                  </button>
+                                    <div className="w-full h-[40vh] flex flex-col items-center justify-center text-gray-400 gap-3">
+                                      <div className="animate-spin border-4 border-white/20 border-t-yellow-400 rounded-full w-10 h-10" />
+                                      <span className="text-sm">Memuat QRIS...</span>
+                                    </div>
                                 )}
                             </div>
                         </div>
 
-                        {/* Bank Column */}
-                        <div className="hidden lg:flex flex-col items-center animate-fade-in-right">
-                            <img src="/assets/QRISBANK.png" alt="Bank Partners" className="w-[460px] h-auto object-contain" />
-                        </div>
+                        {['duitku_qris', 'gopay_merchant_polling'].includes(paymentMethod) ? (
+                          <div role="status" className="mt-4 w-full rounded-xl border border-[#cbf27a]/30 bg-[#19243d] p-4 text-center text-white">
+                            <div className="flex items-center justify-center gap-2 font-bold">
+                              {paymentPollingState === 'expired' ? (
+                                <AlertCircle size={18} className="text-amber-300" />
+                              ) : paymentPollingState === 'retrying' ? (
+                                <RefreshCw size={18} className="animate-spin text-amber-300" />
+                              ) : (
+                                <Loader2 size={18} className="animate-spin text-[#cbf27a]" />
+                              )}
+                              {paymentPollingState === 'expired'
+                                ? 'Sesi pembayaran berakhir'
+                                : paymentPollingState === 'retrying'
+                                  ? 'Menyambungkan ulang'
+                                  : paymentPollingState === 'checking'
+                                    ? 'Memeriksa pembayaran'
+                                    : 'Menunggu konfirmasi otomatis'}
+                            </div>
+                            <p className="mt-2 text-sm text-white/75">
+                              {paymentPollingState === 'expired'
+                                  ? 'Silakan kembali dan mulai sesi baru.'
+                                  : paymentPollingState === 'retrying'
+                                    ? 'Koneksi ke server terputus sementara. Pemeriksaan akan dicoba lagi otomatis.'
+                                    : paymentMethod === 'duitku_qris'
+                                      ? 'Scan QRIS ini untuk membayar. Sesi lanjut otomatis setelah pembayaran dikonfirmasi.'
+                                      : 'Bayar dengan nominal persis seperti yang tertera. Sesi lanjut otomatis setelah pembayaran masuk ke GoPay Merchant.'}
+                            </p>
+                            {flowError && <p className="mt-2 text-sm font-semibold text-amber-300">{flowError}</p>}
+                            {paymentMethod === 'duitku_qris' && (
+                              <p className="mt-2 text-xs text-white/75">
+                                {paymentEnvironment === 'sandbox' && <strong className="block text-amber-300">Mode uji — pembayaran sandbox</strong>}
+                                {paymentExpiresAt && <>Berlaku sampai {new Date(paymentExpiresAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</>}
+                              </p>
+                            )}
+                            {paymentMethod !== 'duitku_qris' && paymentPollingState !== 'expired' && (
+                              <button onClick={handlePaymentConfirm} className="mt-3 rounded-lg px-3 py-2 text-xs font-bold text-white/80 underline underline-offset-2 hover:text-white">
+                                Periksa lewat kamera
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <button onClick={handlePaymentConfirm} className="mt-4 md:mt-6 w-full bg-[#f6cd46] hover:bg-[#e5bc35] text-black py-3 md:py-4 rounded-xl text-lg md:text-xl font-bold shadow-[0_10px_20px_rgba(246,205,70,0.3)] transition-all active:scale-95">
+                            I Have Paid
+                          </button>
+                        )}
                     </div>
 
-
+                    {/* Bank Column */}
+                    <div className="hidden lg:flex flex-1 justify-center">
+                        <img src="/assets/QRISBANK.png" alt="Bank Partners" className="w-full max-w-[320px] h-auto object-contain" />
+                    </div>
                 </div>
-
-                <div className="absolute top-6 left-6 z-50">
-                    <BackButton onClick={() => setStep('LAYOUT')} uiMode={uiMode} />
-                </div>
-             </div>
+            </div>
         </BoothWrapper>
       )}
 
@@ -4593,7 +4575,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
                     aria-checked={selectedPhotoIndices.includes(index)} aria-label={`Foto ${index + 1}`}
                     disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
                     onClick={() => handlePhotoSelection(index)}
-                    className={`photo-selection__photo rounded-xl overflow-hidden border-4 disabled:opacity-50 ${selectedPhotoIndices.includes(index) ? 'border-[#f6cd46]' : 'border-transparent'}`}>
+                    className="photo-selection__photo disabled:opacity-50">
                     {renderCandidatePreview(index)}
                     <span className="block py-3 font-bold">Foto {index + 1}{selectedPhotoIndices.includes(index) ? ` ✓ Pilihan ${selectedPhotoIndices.indexOf(index) + 1}` : ''}</span>
                   </button>
@@ -4606,7 +4588,7 @@ export const PhotoBooth: React.FC<PhotoBoothProps> = ({ onAdminClick, idlePaused
             <div className="flex gap-4 justify-center shrink-0">
               <button id="btn-retake-batch" onClick={handleRetake}
                 disabled={printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
-                className="photo-selection__retake px-6 py-4 rounded-xl disabled:opacity-40">Ulang Semua Foto</button>
+                className="result-button result-button--primary result-button--retake px-6 py-4 disabled:opacity-40">Ulang Semua Foto</button>
               <button id="btn-confirm-print-photo" onClick={handleConfirmPrintSelection}
                 disabled={selectedPhotoIndices.length !== outputCount || capturedPhotos.length !== candidateCount || printSelectionConfirmed || isPrintActive || printActionInFlightRef.current}
                 className="result-button result-button--primary px-8 py-4 rounded-xl disabled:opacity-40">Konfirmasi {outputCount} Foto</button>
